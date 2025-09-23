@@ -22,7 +22,7 @@ Many users struggle to get started with the JC3248W535EN display after purchasin
 
 To use this library, you'll need to install:
 
-1. [Arduino_GFX_Library](https://github.com/moononournation/Arduino_GFX_Library) - For the display graphics
+1. [Arduino_GFX](https://github.com/moononournation/Arduino_GFX) - For the display graphics
 2. Arduino Wire library (built into Arduino IDE)
 3. Arduino ESP32 board support
 
@@ -45,7 +45,7 @@ To use this library, you'll need to install:
 ### Required Dependencies
 
 Install these libraries using Arduino Library Manager:
-1. [Arduino_GFX_Library](https://github.com/moononournation/Arduino_GFX_Library)
+1. [Arduino_GFX](https://github.com/moononournation/Arduino_GFX)
 
 Arduino IDE Setup: 
 For the JC3248W535EN, use ESP332S3 Dev module board. 
