@@ -23,10 +23,11 @@ void setup() {
     Serial.println("Screen initialization failed!");
     return;
   }
+  
   //screen.clear(0, 0, 0); //makes screen black
   screen.clear(100, 100, 100);
   screen.flush();
-  
+
   // Print available commands
   Serial.println("Serial command interface ready!");
   Serial.println("Available commands (format: command|param1|param2|...):");
@@ -220,4 +221,15 @@ void processSerialCommand() {
 
 void loop() {
   processSerialCommand();
+
+  if (screen.getTouchPoint(touchX, touchY)){
+    Serial.println("Touch Pressed:" + String(touchX) + "," + String(touchY));
+    screen.setColor(50,50,50);
+    screen.drawFillRect(0, 0, 480, 80);
+    screen.setColor(255,0,0);
+    screen.prt((String(touchX) + "," + String(touchY)),0,0,7);
+    screen.drawCircleOutline(touchX, touchY, 4);
+    screen.flush();	// THIS IS NEEDED FOR ANY CHANGE ON THE SCREEN TO TAKE PLACE!
+    delay(50);
+  }
 }
