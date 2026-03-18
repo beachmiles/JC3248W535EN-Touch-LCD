@@ -35,7 +35,7 @@ To use this library, you'll need to install:
 3. Search for "JC3248W535EN"
 4. Click Install
 
-### Manual Installation
+### Manual Installation (IF Arduino Install Above Fails)
 
 1. Download this repository as ZIP
 2. In Arduino IDE, go to Sketch -> Include Library -> Add .ZIP Library...
@@ -44,30 +44,31 @@ To use this library, you'll need to install:
 
 ### Required Dependencies
 
-Install these libraries using Arduino Library Manager:
-1. [Arduino_GFX](https://github.com/moononournation/Arduino_GFX)
+Install these libraries using Arduino Library Manager or manually:
+1. [Arduino_GFX **(aka GFX Library for Arduino by moononournation)**](https://github.com/moononournation/Arduino_GFX)
+2. [JPEGDecoder by Bodmer](https://github.com/Bodmer/JPEGDecoder)
 
 Arduino IDE Setup: 
-For the JC3248W535EN, use ESP332S3 Dev module board. 
-Set up as follow: 
+For the JC3248W535EN, use <mark>**ESP32S3 Dev Module**</mark> board in Arduino. 
+Set Arduino up as follows under Tools menu: 
 
-USB CDC On Boot: "Enabled" // Important for Serial communication
-CPU Frequency: "240MHz (WiFi)"
-Core Debug Level: "None"
-USB DFU On Boot: "Disabled"
-Erase All Flash Before Sketch Upload: "Disabled"
-Events Run On: "Core 1"
-Flash Mode: "QIO 80MHz"
-Flash Size: "16MB (128Mb)"
-JTAG Adapter: "Disabled"
-Arduino Runs On: "Core 1"
-USB Firmware MSC On Boot: "Disabled"
-Partition Scheme: "8M with spiffs (3MB APP/1.5MB SPIFFS)"
-PSRAM: "OPI PSRAM"
-Upload Mode: "UART0 / Hardware CDC"
-Upload Speed: "921600"
-USB Mode: "Hardware CDC and JTAG"
-Zigbee Mode: "Disabled"
+- USB CDC On Boot: "Enabled" // Important for Serial communication
+- CPU Frequency: "240MHz (WiFi)"
+- Core Debug Level: "None"
+- USB DFU On Boot: "Disabled"
+- Erase All Flash Before Sketch Upload: "Disabled"
+- Events Run On: "Core 1"
+- Flash Mode: "QIO 80MHz"
+- Flash Size: "16MB (128Mb)"
+- JTAG Adapter: "Disabled"
+- Arduino Runs On: "Core 1"
+- USB Firmware MSC On Boot: "Disabled"
+- Partition Scheme: "8M with spiffs (3MB APP/1.5MB SPIFFS)"
+- PSRAM: "OPI PSRAM"
+- Upload Mode: "UART0 / Hardware CDC"
+- Upload Speed: "921600"
+- USB Mode: "Hardware CDC and JTAG"
+- Zigbee Mode: "Disabled"
 
 
 Tools 
