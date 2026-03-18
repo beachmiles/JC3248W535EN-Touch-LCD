@@ -20,11 +20,11 @@ Many users struggle to get started with the JC3248W535EN display after purchasin
 
 ## Dependencies
 
-To use this library, you'll need to install:
+To use this library, you'll need to install the following before installing JC3248W535EN library:
 
-1. [Arduino_GFX](https://github.com/moononournation/Arduino_GFX) - For the display graphics
-2. Arduino Wire library (built into Arduino IDE)
-3. Arduino ESP32 board support
+1. [Arduino_GFX **(aka GFX Library for Arduino by moononournation)**](https://github.com/moononournation/Arduino_GFX) - For the display graphics
+2. [JPEGDecoder by Bodmer](https://github.com/Bodmer/JPEGDecoder)
+3. [Arduino esp32 board library by Espressif](https://docs.espressif.com/projects/arduino-esp32/en/latest/installing.html#installing-using-arduino-ide)
 
 ## Installation
 
@@ -35,22 +35,17 @@ To use this library, you'll need to install:
 3. Search for "JC3248W535EN"
 4. Click Install
 
-### Manual Installation (IF Arduino Install Above Fails)
+### Manual Installation (IF Arduino Library Manager install above fails)
 
 1. Download this repository as ZIP
 2. In Arduino IDE, go to Sketch -> Include Library -> Add .ZIP Library...
 3. Select the downloaded ZIP file
 4. Restart Arduino IDE
 
-### Required Dependencies
+### Arduino IDE Setup
 
-Install these libraries using Arduino Library Manager or manually:
-1. [Arduino_GFX **(aka GFX Library for Arduino by moononournation)**](https://github.com/moononournation/Arduino_GFX)
-2. [JPEGDecoder by Bodmer](https://github.com/Bodmer/JPEGDecoder)
-
-Arduino IDE Setup: 
-For the JC3248W535EN, use <mark>**ESP32S3 Dev Module**</mark> board in Arduino. 
-Set Arduino up as follows under Tools menu: 
+For the JC3248W535EN board, use the <mark>**"ESP32S3 Dev Module"**</mark> board in Arduino.<br>
+Set the following arduino settings for the ESP32S3 Dev Module up as follows under Tools menu: 
 
 - USB CDC On Boot: "Enabled" // Important for Serial communication
 - CPU Frequency: "240MHz (WiFi)"
@@ -69,9 +64,6 @@ Set Arduino up as follows under Tools menu:
 - Upload Speed: "921600"
 - USB Mode: "Hardware CDC and JTAG"
 - Zigbee Mode: "Disabled"
-
-
-Tools 
 
 ## Usage Examples
 
@@ -93,6 +85,7 @@ void setup() {
   
   // Clear the screen with white background
   screen.clear(255, 255, 255);
+  screen.flush();  // HAVE TO USE THIS ANYTIME YOU WANT SCREEN TO UPDATE!
 }
 
 void loop() {
@@ -123,6 +116,8 @@ void setup() {
   // Draw text
   screen.setColor(0, 0, 0);
   screen.prt("Hello World!", 120, 250, 2);
+
+  screen.flush();  // HAVE TO USE THIS ANYTIME YOU WANT SCREEN TO UPDATE!
 }
 
 void loop() {
@@ -143,6 +138,7 @@ void setup() {
   screen.clear(255, 255, 255);
   screen.setColor(0, 0, 0);
   screen.prt("Touch the screen!", 80, 200, 2);
+  screen.flush();  // HAVE TO USE THIS ANYTIME YOU WANT SCREEN TO UPDATE!
 }
 
 void loop() {
@@ -156,6 +152,7 @@ void loop() {
     String coords = "X: " + String(touchX) + " Y: " + String(touchY);
     screen.clear(255, 255, 255);
     screen.prt(coords, 100, 240, 2);
+    screen.flush();  // HAVE TO USE THIS ANYTIME YOU WANT SCREEN TO UPDATE!
     
     delay(100);  // Small delay to prevent too many readings
   }
@@ -180,6 +177,7 @@ void setup() {
                    
   screen.setColor(0, 0, 0);
   screen.prt("Scan me!", 120, 60, 2);
+  screen.flush();  // HAVE TO USE THIS ANYTIME YOU WANT SCREEN TO UPDATE!
 }
 
 void loop() {
