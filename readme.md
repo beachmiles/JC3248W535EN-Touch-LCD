@@ -67,6 +67,8 @@ Set the following arduino settings for the ESP32S3 Dev Module up as follows unde
 
 ## Usage Examples
 
+<mark>**NOTE: The TouchScreenAndSerialCommands example is prob the best example with the ButtonGuiClass usage**</mark><br>
+
 ### Basic Initialization
 
 ```arduino
