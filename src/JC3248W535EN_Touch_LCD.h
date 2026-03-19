@@ -4,6 +4,8 @@
  *  See: https://github.com/AudunKodehode/JC3248W535EN-Touch-LCD
  */
 
+//#define USE_TOUCHSCREEN_FUDGE_FACTOR		//the touchscreen doent appear to cover the whole panel
+
 #ifndef JC3248W535EN_TOUCH_LCD_H
 #define JC3248W535EN_TOUCH_LCD_H
 
@@ -16,6 +18,9 @@ public:
     JC3248W535EN();
     bool begin();
     
+	uint16_t width = 480;	//screen width
+	uint16_t height = 320;	//screen height
+	
     // Color functions
     uint16_t rgb(uint8_t r, uint8_t g, uint8_t b);
     void setColor(uint8_t r, uint8_t g, uint8_t b);
@@ -59,7 +64,8 @@ public:
     bool getTouchPoint(uint16_t &x, uint16_t &y);
     
     // Make gfx accessible for direct pixel manipulation
-    Arduino_Canvas* gfx;
+    //Arduino_Canvas* gfx;			//this is the buffered version
+	Arduino_GFX *gfx;				//this should allow for other example code to be used
     
 private:
     Arduino_ESP32QSPI* bus;
