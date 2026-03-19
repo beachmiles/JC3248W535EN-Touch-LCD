@@ -64,8 +64,8 @@ public:
     bool getTouchPoint(uint16_t &x, uint16_t &y);
     
     // Make gfx accessible for direct pixel manipulation
-    //Arduino_Canvas* gfx;			//this is the buffered version
-	Arduino_GFX *gfx;				//this should allow for other example code to be used
+    Arduino_Canvas* gfx;			//this is the buffered version
+	//Arduino_GFX *gfx;				//this appears to act the exact same should allow for other example code to be used?
     
 private:
     Arduino_ESP32QSPI* bus;
