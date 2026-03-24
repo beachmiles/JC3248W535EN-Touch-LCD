@@ -68,6 +68,11 @@ Set the following arduino settings for the ESP32S3 Dev Module up as follows unde
 ## Usage Examples
 
 <mark>**NOTE: The TouchScreenAndSerialCommands example is prob the best example with the ButtonGuiClass usage**</mark><br>
+Here are pics of the TouchScreenAndSerialCommands example with the 2 panels.
+
+<img src="https://github.com/user-attachments/assets/8038cd5b-13cf-4ae0-8d81-6f2924f21115" alt="esp32_mainScreen" width="300">
+<img src="https://github.com/user-attachments/assets/ad09598d-4818-4e99-8730-0f33f84e30c8" alt="esp32_panel1" width="300">
+<img src="https://github.com/user-attachments/assets/5c8fdd44-ba0c-4ff7-83f2-4ffe8b4d9118" alt="esp32_panel2" width="300">
 
 ### Basic Initialization
 
