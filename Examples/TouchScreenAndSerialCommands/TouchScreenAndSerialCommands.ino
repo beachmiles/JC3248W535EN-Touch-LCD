@@ -1,5 +1,6 @@
 #include <JC3248W535EN-Touch-LCD.h>
 #include "ButtonGuiClass.h"     //uses the JC3248W535EN functions
+//#include "glcdfont.h"
 
 //Need to install these libraries 1st
 //Verified with v1.6.5 GFX Library for Arduino / Arduino_GFX_Library.h 
@@ -18,6 +19,7 @@ JC3248W535EN *screenPtr = &screen;  //Pointer used for button functions
 
 static const String programVersion = "1.0.0";    //program version
 uint16_t touchX, touchY;            //touch screen variables.
+String curTestPanel = "Test";
 
 //vars for clock
 static int16_t hh, mm, ss;
@@ -25,10 +27,16 @@ static unsigned long targetTime = 0; // next action time
 unsigned long cur_millis;
 String clockString;                  // holds the created time screen. Happens once a second
 
-ButtonGuiClass LastTouch    (screenPtr, 325, 40, 150, 28, 255, 100, 100, "Last Touch", 2);   //button showing the last touch time
-ButtonGuiClass CS           (screenPtr, 325, 70, 150, 28, 200, 255, 255, "Clear Screen", 2); //button to clear the screen
-ButtonGuiClass ColorRand    (screenPtr, 325, 100, 150, 28, 100, 255, 255, "Random Color", 2);  //button to make a random background color
-ButtonGuiClass ResetChip    (screenPtr, 325, 130, 150, 28, 0xFF, 0xFF, 0x00, "Reset Esp32", 2);   //button to reset esp32
+//Test and Panel 1 buttons
+ButtonGuiClass LastTouch    (screenPtr, 325, 40, 150, 28, 255, 100, 100, "Last Touch", 2);   //PANEL 1 button showing the last touch time
+ButtonGuiClass CS           (screenPtr, 325, 70, 150, 28, 200, 255, 255, "Clear Screen", 2); //PANEL 1 button to clear the screen
+ButtonGuiClass ColorRand    (screenPtr, 325, 100, 150, 28, 100, 255, 255, "Random Color", 2);  //PANEL 1 button to make a random background color
+
+//Panel 2 buttons
+ButtonGuiClass ResetChip    (screenPtr, 325, 40, 150, 28, 0xFF, 0xFF, 100, "Reset Esp32", 2);   //PANEL 2 button to reset esp32
+
+ButtonGuiClass Panel1Button (screenPtr, 0, 300, 230, 28, 200, 255, 255, "Switch to Panel 1", 2);     //button to switch to panel 1
+ButtonGuiClass Panel2Button (screenPtr, 240, 300, 230, 28, 255, 255, 100, "Admin Settings", 2);   //button to switch to panel 2
 
 void setup() {
   Serial.begin(115200);
@@ -39,29 +47,9 @@ void setup() {
     return;
   }
   //gfx->setRotation(1);  //If using other gfx libaries prob need to do this. You have to use one or the other unfortuantly currently as setting this breaks what the guy did to get the Arduino_Canvas working on this board
-
-  screen.clear(5, 70, 70); //set background to be dark teal
-  LastTouch.displayButt();  //display the button
-  CS.displayButt();         //display the button
-  ColorRand.displayButt();  //display the button
-  ResetChip.displayButt();  //display the button
-
-  screen.setColor(255,255,255);                       //set text color
-  screen.prt("Program Ver=" + programVersion,0,0,3);  //print text
-  screen.setColor(255,100,100);      //set text color
-  screen.prt("Font size-1",0,40,1);  //print text
-  screen.prt("Font size-2",0,60,2);  //print text
-  screen.prt("Font size-3",0,80,3);  //print text
-  screen.prt("Font size-4",0,110,4); //print text
-  screen.prt("Font size-5",0,140,5); //print text
-
-  screen.setColor(10,90,100);                                    //set background color of rectangle
-  screen.drawFillRect(0, 250, screen.width, screen.height - 250); //clear the status bar
-  screen.setColor(50,255,255);               //set text color
-  screen.prt("Click on buttons or screen to test functions. Testing the wrap around functon on screen. It should auto wrap",0,260,2);  //print text
-  
-  //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-  screen.flush(); //update display HAVE TO DO THIS ANYTIME YOU WANT THE SCREEN TO UPDATE!
+  curTestPanel = "Test";
+  displayScreen();
+  curTestPanel = "Panel1";
 
   // Print available serial commands
   Serial.println("Serial command interface ready!");
@@ -92,74 +80,184 @@ void loop() {
 
 //Note the touchscreen on this unit doesnt seem to be enabled around the outside edge of the display
 void handleTouchScreen(){
+
+  // Check if the display was touched. touchX & touchY are GLOBAL VARS
   if (screen.getTouchPoint(touchX, touchY)){
-    LastTouch.updateText("LT=" + clockString);
+    LastTouch.Text = "LT=" + clockString;         //update time on button but dont automatically re-display button
+    //LastTouch.updateText("LT=" + clockString);  //update text and display button
 
-    //check if our last touch clock button was clicked
-    if (LastTouch.checkIfClicked(touchX, touchY)){
-      screen.setColor(50,50,50);          //set background color of rectangle
-      screen.drawFillRect(0, 0, 320, 40); //clear the status bar
-      screen.setColor(255,100,100);       //set text color
-      screen.prt("Last touch button clicked",0,0,2); //print touch coords
-      delay(50);
+    //for now consider the Test and Panel1 to have the same button layout
+    if (curTestPanel == "Test" || curTestPanel == "Panel1")
+    {
+      //check if our last touch clock button was clicked
+      if (LastTouch.checkIfClicked(touchX, touchY)){
+        screen.setColor(50,50,50);          //set background color of rectangle
+        screen.drawFillRect(0, 0, 320, 40); //clear the status bar
+        screen.setColor(255,100,100);       //set text color
+        screen.prt("Last touch button clicked",0,0,2); //print touch coords
+        delay(100);
+      }
+
+      //check if our clear screen button was clicked
+      else if (CS.checkIfClicked(touchX, touchY)){
+        screen.clear(0,0,0);                //black out screen
+        //displayScreen();
+        displayPanel1Buttons();
+
+        screen.setColor(50,50,50);          //set background color of rectangle
+        screen.drawFillRect(0, 0, 320, 40); //clear the status bar
+        screen.setColor(255,255,255);       //set text color
+        screen.prt("Screen Cleared",0,0,3); //print touch coords
+        delay(100);
+      }
+      else if (ColorRand.checkIfClicked(touchX, touchY)){
+        screen.clear(random(0, 255),random(0, 255),random(0, 255));                //set random color
+        displayScreen();
+
+        screen.setColor(50,50,50);          //set background color of rectangle
+        screen.drawFillRect(0, 0, 320, 40); //clear the status bar
+        screen.setColor(255,100,100);       //set text color
+        screen.prt("Random Background Color Picked",0,0,2);   //print touch coords
+        delay(100);
+      }
+      //else test for other touches on touchscreen
+      else{
+        Serial.println("Touch Pressed:" + String(touchX) + "," + String(touchY));
+        screen.setColor(0,50,100);          //set background color of rectangle
+        screen.drawFillRect(0, 0, 320, 40); //we are 480 x 80
+        
+        screen.setColor(200,255,255);       //set text color
+        screen.prt((String(touchX) + "," + String(touchY)),0,0,5);    //print touch coords
+
+        screen.setColor(150,255,255);        //set color of circle
+        screen.drawCircleOutline(touchX, touchY, 4);  //print tiny circle where touch happened
+      }
+    }
+    else if (curTestPanel == "Panel2"){
+      if (ResetChip.checkIfClicked(touchX, touchY)){
+        screen.setColor(50,50,50);            //set background color of rectangle
+        screen.drawFillRect(0, 0, 320, 40);   //clear the status bar
+        screen.setColor(255,100,100);         //set text color
+        screen.prt("Resetting esp32",0,0,3);  //print touch coords
+
+        screen.flush();   //anytime you want the screen to update you have to do a flush
+        delay(50);
+        ESP.restart();    //restart esp32
+      }
     }
 
-    //check if our clear screen button was clicked
-    else if (CS.checkIfClicked(touchX, touchY)){
-      screen.clear(0,0,0);                //black out screen
-      displayAllButtonsAndUpdatedText();
-
-      screen.setColor(50,50,50);          //set background color of rectangle
-      screen.drawFillRect(0, 0, 320, 40); //clear the status bar
-      screen.setColor(255,255,255);       //set text color
-      screen.prt("Screen Cleared",0,0,3); //print touch coords
-      delay(50);
-    }
-    else if (ColorRand.checkIfClicked(touchX, touchY)){
-      screen.clear(random(0, 255),random(0, 255),random(0, 255));                //set random color
-      displayAllButtonsAndUpdatedText();
-
-      screen.setColor(50,50,50);          //set background color of rectangle
-      screen.drawFillRect(0, 0, 320, 40); //clear the status bar
-      screen.setColor(255,100,100);       //set text color
-      screen.prt("Random Background Color Picked",0,0,2);   //print touch coords
-      delay(50);
-    }
-    else if (ResetChip.checkIfClicked(touchX, touchY)){
-      screen.setColor(50,50,50);            //set background color of rectangle
-      screen.drawFillRect(0, 0, 320, 40);   //clear the status bar
-      screen.setColor(255,100,100);         //set text color
-      screen.prt("Resetting esp32",0,0,3);  //print touch coords
-
-      screen.flush();   //anytime you want the screen to update you have to do a flush
-      delay(50);
-      ESP.restart();    //restart esp32
-    }
-
-    //else test for other touches on touchscreen
-    else{
-      Serial.println("Touch Pressed:" + String(touchX) + "," + String(touchY));
-      screen.setColor(0,50,100);          //set background color of rectangle
-      screen.drawFillRect(0, 0, 320, 40); //we are 480 x 80
-      
-      screen.setColor(200,255,255);       //set text color
-      screen.prt((String(touchX) + "," + String(touchY)),0,0,5);    //print touch coords
-
-      screen.setColor(150,255,255);        //set color of circle
-      screen.drawCircleOutline(touchX, touchY, 4);  //print tiny circle where touch happened
-    }
-
-    screen.flush();   //for all cases after a touch write to screen
-    delay(10);
+    checkPanelChangeButtons();  //do this for all cases as these buttons should be on every screen
+    screen.flush();             //for all cases after a touch write to screen
+    delay(20);                  //Try to prevent multiple touches with a delay
+    screen.clearTouchData();    //Try to prevent multiple touches after a delay by clearing touch data
   }
 }
 
-void displayAllButtonsAndUpdatedText(){
+//screen flush happens at the end of handleTouchScreen function. touchX & touchY are GLOBAL VARS
+void checkPanelChangeButtons(){
+  if (Panel1Button.checkIfClicked(touchX, touchY)){
+    curTestPanel = "Panel1";
+    screen.clear(5, 50, 50); //clear background to a dark blue
+    //screen.flush();   //for all cases after a touch write to screen
+    displayScreen();
+    delay(50);
+  }
+  else if (Panel2Button.checkIfClicked(touchX, touchY)){
+    curTestPanel = "Panel2";
+    screen.clear(0, 0, 0); //clear background to BLACK
+    //screen.flush();   //for all cases after a touch write to screen
+    displayScreen();
+    delay(50);
+  }
+}
+
+
+void displayScreen(){
+  if (curTestPanel == "Test"){
+    displayTestScreen();
+  }
+  else if (curTestPanel == "Panel1"){
+    panel1Display();
+  }
+  else if (curTestPanel == "Panel2"){
+    panel2Display();
+  }
+  //for unknown case show test screen
+  else{
+    panel1Display();
+    screen.setColor(50,50,50);          //set background color of rectangle
+    screen.drawFillRect(0, 0, 320, 40); //clear the status bar
+    screen.setColor(255,100,100);       //set text color
+    screen.prt("curTestPanel=" + curTestPanel,0,0,2);   //print touch coords
+  }
+}
+
+void panel1Display(){
+  screen.setColor(100,255,255);       //set text color
+  screen.prt("Panel 1",0,0,3);   //print touch coords
+
+  screen.setColor(255,255,255);       //set text color
+  screen.prt("Random Data 1..........",0,40,2);   //print touch coords
+  screen.prt("Random Data 2..........",0,60,2);   //print touch coords
+  screen.prt("Random Data 3..........",0,80,2);   //print touch coords
+  displayPanel1Buttons();
+}
+
+void displayPanel1Buttons(){
   LastTouch.displayButt();            //display the button
   CS.displayButt();                   //redisplay button
   ColorRand.displayButt();            //redisplay button
+  printCurrentClock();                //display clock
+  Panel1Button.displayButt();
+  Panel2Button.displayButt();
+}
+
+void panel2Display(){
+  screen.setColor(100,255,255);       //set text color
+  screen.prt("Admin Settings",0,0,3);   //print touch coords
+
+  screen.setColor(255,255,255);       //set text color white
+  screen.prt("Admin Data 1=" + String(random(0,10)),0,40,2);   //print touch coords
+  screen.prt("Admin Data 2=" + String(random(0,1000)),0,60,2);   //print touch coords
+  screen.prt("Admin Data 3=" + String(random(0,1000)),0,80,2);   //print touch coords
+  screen.prt("Admin Data 4=" + String(random(0,1000)),0,100,2);   //print touch coords
+  screen.prt("Admin Data 5=" + String(random(0,1000)),0,120,2);   //print touch coords
+
   ResetChip.displayButt();            //redisplay button
   printCurrentClock();                //display clock
+  Panel1Button.displayButt();
+  Panel2Button.displayButt();
+}
+
+void displayTestScreen(){
+  screen.clear(5, 70, 70); //set background to be dark teal
+
+  screen.setColor(255,255,255);                       //set text color
+  //screen.setFont(&Roboto_Regular16pt7b);              //use roboto font. WARNING THIS IS A FIXED LARGE FONT
+  //screen.setFont(NULL);                               //revert to original font?
+
+  screen.prt("Program Ver=" + programVersion,0,0,3);  //print text
+  screen.setColor(255,100,100);      //set text color
+  screen.prt("Font size-1",0,40,1);  //print text
+  screen.prt("Font size-2",0,60,2);  //print text
+  screen.prt("Font size-3",0,80,3);  //print text
+  screen.prt("Font size-4",0,110,4); //print text
+  screen.prt("Font size-5",0,140,5); //print text
+
+  screen.setColor(10,90,100);                                    //set background color of rectangle
+  screen.drawFillRect(0, 210, screen.width, screen.height - 210); //clear the status bar
+  screen.setColor(50,255,255);               //set text color
+  screen.prt("Click on buttons or screen to test functions. Testing the wrap around functon on screen. It should auto wrap",0,220,2);  //print text
+  
+  LastTouch.displayButt();            //display the button
+  CS.displayButt();                   //redisplay button
+  ColorRand.displayButt();            //redisplay button
+  printCurrentClock();                //display clock
+  Panel1Button.displayButt();
+  Panel2Button.displayButt();
+
+  //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  screen.flush(); //update display HAVE TO DO THIS ANYTIME YOU WANT THE SCREEN TO UPDATE! 
 }
 
 //should just use the button class for this and update the text

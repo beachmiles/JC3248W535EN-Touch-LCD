@@ -21,6 +21,10 @@ public:
 	uint16_t width = 480;	//screen width
 	uint16_t height = 320;	//screen height
 	
+	//prob better to store last touch variables here?
+	uint16_t xT;
+	uint16_t yT;
+	
     // Color functions
     uint16_t rgb(uint8_t r, uint8_t g, uint8_t b);
     void setColor(uint8_t r, uint8_t g, uint8_t b);
@@ -60,8 +64,11 @@ public:
     uint16_t mapX(uint16_t x, uint16_t y);
     uint16_t mapY(uint16_t x, uint16_t y);
     
-    // Touch function
+    // Touch function returns x and y values back to calling function. 
+	//Prob want to use internal xT, yT variables here?
     bool getTouchPoint(uint16_t &x, uint16_t &y);
+	
+	void clearTouchData(void);	//try to clear any touch interrupts
     
     // Make gfx accessible for direct pixel manipulation
     Arduino_Canvas* gfx;			//this is the buffered version

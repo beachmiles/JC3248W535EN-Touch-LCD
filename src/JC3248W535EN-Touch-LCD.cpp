@@ -221,6 +221,11 @@ void JC3248W535EN::prt(const String &text, int x, int y, uint8_t size) {
     gfx->setRotation(originalRotation);
 }
 
+void JC3248W535EN::clearTouchData(void){
+	//there is prob a much more elegant way but for now just read the i2c data
+	getTouchPoint(xT, yT);
+}
+
 //this may be compatible with the AXS15231B touchscreen?
 bool JC3248W535EN::getTouchPoint(uint16_t &x, uint16_t &y) {
     uint8_t data[AXS_MAX_TOUCH_NUMBER * 6 + 2] = {0};
