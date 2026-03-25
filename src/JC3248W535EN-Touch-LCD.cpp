@@ -241,7 +241,8 @@ bool JC3248W535EN::getTouchPoint(uint16_t &x, uint16_t &y) {
     Wire.beginTransmission(TOUCH_ADDR);
     Wire.write(read_cmd, 11);
     if (Wire.endTransmission() != 0) return false;
-    
+    delay(1);	//add a tiny delay before the read?
+	
     if (Wire.requestFrom(TOUCH_ADDR, sizeof(data)) != sizeof(data)) return false;
     
     for (int i = 0; i < sizeof(data); i++) {
@@ -264,7 +265,13 @@ bool JC3248W535EN::getTouchPoint(uint16_t &x, uint16_t &y) {
 			x = map(x, 14, 461, 0, width);	//try to fudge factor fix
 		#endif
 		
-        return true;
+		//prob want to add a range check here to ensure the click is truly in bounds
+		if (x > width || y > height ){
+			return false;
+		}
+		else{
+			return true;
+		}
     }
     
     return false;

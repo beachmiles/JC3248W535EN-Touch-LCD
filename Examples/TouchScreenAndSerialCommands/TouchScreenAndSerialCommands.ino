@@ -17,7 +17,7 @@ JC3248W535EN screen;                //The main display variable
 JC3248W535EN *screenPtr = &screen;  //Pointer used for button functions
 //Arduino_GFX *gfx = screen.gfx;      //in case anyone want to use direct gfx calls. Will not work seamlessly with "JC3248W535EN screen" as the rotation is different
 
-static const String programVersion = "1.0.0";    //program version
+static const String programVersion = "1.0.1";    //program version
 uint16_t touchX, touchY;            //touch screen variables.
 String curTestPanel = "Test";
 
@@ -111,13 +111,17 @@ void handleTouchScreen(){
         delay(100);
       }
       else if (ColorRand.checkIfClicked(touchX, touchY)){
-        screen.clear(random(0, 255),random(0, 255),random(0, 255));                //set random color
+        uint8_t randR = random(0, 255);
+        uint8_t randG = random(0, 255);
+        uint8_t randB = random(0, 255);
+        screen.clear(randR,randG,randB);    //set random color
         displayScreen();
 
         screen.setColor(50,50,50);          //set background color of rectangle
         screen.drawFillRect(0, 0, 320, 40); //clear the status bar
         screen.setColor(255,100,100);       //set text color
-        screen.prt("Random Background Color Picked",0,0,2);   //print touch coords
+        screen.prt("Random Background Color",0,0,2);   //print touch coords
+        screen.prt("RGB=" + String(randR) + "," + String(randG) + "," + String(randB),0,20,2);   //print touch coords
         delay(100);
       }
       //else test for other touches on touchscreen
@@ -147,6 +151,7 @@ void handleTouchScreen(){
     }
 
     checkPanelChangeButtons();  //do this for all cases as these buttons should be on every screen
+
     screen.flush();             //for all cases after a touch write to screen
     delay(20);                  //Try to prevent multiple touches with a delay
     screen.clearTouchData();    //Try to prevent multiple touches after a delay by clearing touch data
