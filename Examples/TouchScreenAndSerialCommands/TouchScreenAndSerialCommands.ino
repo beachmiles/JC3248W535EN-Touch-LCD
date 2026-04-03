@@ -18,12 +18,15 @@
 #include "SD_MMC.h"
 #include "FS.h"
 #include "pincfg.h"
+uint8_t cardType = CARD_NONE;
+int sdBootCounter = 1;
 //#include <vector>
 /////////////// END SD CARD STUFF
 
-//#define USE_HID_KEYBOARD
+//#define USE_HID_KEYBOARD    //If this flag is set then use the USB keyboard
 #ifdef USE_HID_KEYBOARD
-  //Add keyboard libraries
+  //Add keyboard libraries. 
+  //This kills the Serial port unless you enable Upload Mode=USB-OTG CDC (TinyUSB) and USB MODE=USB-OTG (TinyUSB) in arduino settings
   #include "USB.h"
   #include "USBHIDKeyboard.h"
   USBHIDKeyboard Keyboard;
@@ -35,7 +38,7 @@ JC3248W535EN screen;                //The main display variable
 JC3248W535EN *screenPtr = &screen;  //Pointer used for button functions
 //Arduino_GFX *gfx = screen.gfx;      //in case anyone want to use direct gfx calls. Will not work seamlessly with "JC3248W535EN screen" as the rotation is different
 
-static const String programVersion = "1.0.2";    //program version
+static const String programVersion = "1.0.3";    //program version
 uint16_t touchX, touchY;            //touch screen variables.
 String curTestPanel = "Test";
 
@@ -60,21 +63,30 @@ ButtonGuiClass Panel1Button (screenPtr, 0, 300, 230, 28, 200, 255, 255, "Switch 
 ButtonGuiClass Panel2Button (screenPtr, 240, 300, 230, 28, 255, 255, 100, "Admin Settings", 2);   //button to switch to panel 2
 
 void setup() {
+  // 1. Native USB Serial (CDC)
   Serial.begin(115200);
+  //while (!Serial) {delay(10); } //wait for serial monitor to open
+
+  // Hardware UART0  This goes to the physical TX/RX pins or the "UART" USB port
+  Serial0.begin(115200); 
 
   // Initialize the screen
   if (!screen.begin()) {
     Serial.println("Screen initialization failed!");
+    Serial0.println("Serial0 Screen initialization failed!");
     return;
   }
   //gfx->setRotation(1);  //If using other gfx libaries prob need to do this. You have to use one or the other unfortuantly currently as setting this breaks what the guy did to get the Arduino_Canvas working on this board
   //curTestPanel = "Panel1";
-  curTestPanel = "Test";
+  curTestPanel = "Test";    //default to test mode
   displayScreen();
   screen.flush(); //update display HAVE TO DO THIS ANYTIME YOU WANT THE SCREEN TO UPDATE! 
+  curTestPanel = "Panel1";  //change us to a non test background after any following buttons
 
   // Print available serial commands
   Serial.println("Serial command interface ready!");
+  Serial0.println("Serial0 Serial command interface ready!");
+
   Serial.println("Available commands (format: command|param1|param2|...):");
   Serial.println("  prt|text|x|y|size");
   Serial.println("  clear|r|g|b");
@@ -93,16 +105,19 @@ void setup() {
   Serial.println("  drawFillEllipse|x|y|rx|ry");
   Serial.println("  flush");
 
-  //init SD card
-  initSDcard();
-
   // initialize control over the keyboard:
   #ifdef USE_HID_KEYBOARD
     Keyboard.begin();
     USB.begin();
+    delay(1000);
   #else
     Serial.println("\nUSE_HID_KEYBOARD not being used");
+    Serial0.println("Serial0 USE_HID_KEYBOARD not being used");
   #endif
+
+  //init SD card
+  initSDcard();
+  incrementBootCounterOnSdCard();
 }
 
 void loop() {
@@ -129,6 +144,11 @@ void handleTouchScreen(){
         screen.setColor(255,100,100);       //set text color
         screen.prt("Last touch button clicked",0,0,2); //print touch coords
         delay(100);
+        #ifdef USE_HID_KEYBOARD
+          //Keyboard.write('\n'); 
+          //Keyboard.print("https://google.com");
+          Keyboard.println("https://google.com");
+        #endif
       }
 
       //check if our clear screen button was clicked
@@ -165,6 +185,7 @@ void handleTouchScreen(){
         screen.drawFillRect(0, 0, 320, 40);   //clear the status bar
         screen.setColor(255,100,100);         //set text color
         screen.prt("Listing SD Files",0,0,2);  //print touch coords
+        screen.prt("Bootcnt=" + String(sdBootCounter),0,20,2);  //print touch coords
 
         screen.setColor(255,255,255);          //set background color of rectangle
         Serial.println("Showing SD files");
@@ -269,12 +290,7 @@ void displayScreen(){
   }
   //for unknown case show test screen
   else{
-    //panel1Display();                    //show normal buttons
     displayTestScreen();
-    screen.setColor(50,50,50);          //set background color of rectangle
-    screen.drawFillRect(0, 0, 320, 40); //clear the status bar
-    screen.setColor(255,100,100);       //set text color
-    screen.prt("curTestPanel=" + curTestPanel,0,0,2);   //print touch coords
   }
 }
 
@@ -389,7 +405,8 @@ void displayUptime(){
       clockString = clockString + "0";
     }
     clockString = clockString + ss;
-    
+    Serial.println(clockString);
+    Serial0.println("Serial0-" + clockString);
     printCurrentClock();
     screen.flush();
   }
@@ -424,6 +441,39 @@ void showSdFilesOnLCD(){
   listDir(SD_MMC, "/", 0, 1);
 }
 
+void incrementBootCounterOnSdCard(){
+  //first make sure card exists
+  if (cardType != CARD_NONE) {
+
+    // Open File
+    File file = SD_MMC.open("/bootCnt.txt");
+    if (!file) {
+      Serial.println("Failed to open bootCnt.txt");
+      writeFile(SD_MMC, "/bootCnt.txt", "1");       //create file if it doesnt exist
+      return;
+    }
+
+    // Read File and Convert to Integer
+    else if (file.available()) {
+      String data = file.readString();  // Read text string
+      Serial.println("bootCnt initial value=" + String(data));
+
+      sdBootCounter = data.toInt();         // Convert to integer [5] 
+      sdBootCounter = sdBootCounter + 1;                //increment boot counter
+      //appendFile(SD_MMC, "/bootCounter.txt", String(value) + "\n");
+      writeFile(SD_MMC, "/bootCnt.txt", String(sdBootCounter).c_str());
+    }
+    else{
+      writeFile(SD_MMC, "/bootCnt.txt", "1");       //create file if its not availiable. This prob shouldnt be hit
+    }
+
+    file.close(); //always try to close file when done writing to try and ensure it doesnt get lost if power is lost
+  }
+  else{
+    Serial.println("No SD_MMC card attached");
+  }
+}
+
 void initSDcard(){
   esp_rom_printf("Initialize tf card\n");
   //SD_MMC.setPins(SD_MMC_CLK, SD_MMC_CMD, SD_MMC_D0);
@@ -446,7 +496,7 @@ void initSDcard(){
     return;
   }
   else{
-    uint8_t cardType = SD_MMC.cardType();
+    cardType = SD_MMC.cardType();
 
     if (cardType == CARD_NONE) {
       Serial.println("No SD_MMC card attached");
