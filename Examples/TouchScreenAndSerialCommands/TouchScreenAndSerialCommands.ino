@@ -8,16 +8,34 @@
 //https://github.com/Bodmer/JPEGDecoder
 
 //And then install this JC3248W535EN-Touch-LCD library manually in Arduino by adding zip libarary.
-//I tested with the 0.9.6 version
+//I started with this 0.9.6 version
 //https://github.com/AudunKodehode/JC3248W535EN-Touch-LCD/releases/tag/0.9.6
-
+//then made updates here
+//https://github.com/beachmiles/JC3248W535EN-Touch-LCD
 //Have to use screen.flush() for anything to change on the display.
+
+//Add SD librarys. Found in pincfg.j om DEMO_MJPEG folder
+#include "SD_MMC.h"
+#include "FS.h"
+#include "pincfg.h"
+//#include <vector>
+/////////////// END SD CARD STUFF
+
+//#define USE_HID_KEYBOARD
+#ifdef USE_HID_KEYBOARD
+  //Add keyboard libraries
+  #include "USB.h"
+  #include "USBHIDKeyboard.h"
+  USBHIDKeyboard Keyboard;
+#endif 
+
+#include "soc/rtc_cntl_reg.h"       //has esp32 register for reboot to bootloader 
 
 JC3248W535EN screen;                //The main display variable
 JC3248W535EN *screenPtr = &screen;  //Pointer used for button functions
 //Arduino_GFX *gfx = screen.gfx;      //in case anyone want to use direct gfx calls. Will not work seamlessly with "JC3248W535EN screen" as the rotation is different
 
-static const String programVersion = "1.0.1";    //program version
+static const String programVersion = "1.0.2";    //program version
 uint16_t touchX, touchY;            //touch screen variables.
 String curTestPanel = "Test";
 
@@ -31,9 +49,12 @@ String clockString;                  // holds the created time screen. Happens o
 ButtonGuiClass LastTouch    (screenPtr, 325, 40, 150, 28, 255, 100, 100, "Last Touch", 2);   //PANEL 1 button showing the last touch time
 ButtonGuiClass CS           (screenPtr, 325, 70, 150, 28, 200, 255, 255, "Clear Screen", 2); //PANEL 1 button to clear the screen
 ButtonGuiClass ColorRand    (screenPtr, 325, 100, 150, 28, 100, 255, 255, "Random Color", 2);  //PANEL 1 button to make a random background color
+ButtonGuiClass ListSdFILES  (screenPtr, 325, 130, 150, 28, 255, 255, 255, "List Files", 2);  //PANEL 1 button to make a random background color
+ButtonGuiClass TestModeBut  (screenPtr, 325, 160, 150, 28, 255, 255, 255, "TestMode Off", 2);  //PANEL 1 button to make a random background color
 
 //Panel 2 buttons
 ButtonGuiClass ResetChip    (screenPtr, 325, 40, 150, 28, 0xFF, 0xFF, 100, "Reset Esp32", 2);   //PANEL 2 button to reset esp32
+ButtonGuiClass ResetToBL    (screenPtr, 325, 70, 150, 28, 0xFF, 100, 100, "Enter BootLDR", 2);   //PANEL 2 button to reset esp32
 
 ButtonGuiClass Panel1Button (screenPtr, 0, 300, 230, 28, 200, 255, 255, "Switch to Panel 1", 2);     //button to switch to panel 1
 ButtonGuiClass Panel2Button (screenPtr, 240, 300, 230, 28, 255, 255, 100, "Admin Settings", 2);   //button to switch to panel 2
@@ -47,9 +68,10 @@ void setup() {
     return;
   }
   //gfx->setRotation(1);  //If using other gfx libaries prob need to do this. You have to use one or the other unfortuantly currently as setting this breaks what the guy did to get the Arduino_Canvas working on this board
+  //curTestPanel = "Panel1";
   curTestPanel = "Test";
   displayScreen();
-  curTestPanel = "Panel1";
+  screen.flush(); //update display HAVE TO DO THIS ANYTIME YOU WANT THE SCREEN TO UPDATE! 
 
   // Print available serial commands
   Serial.println("Serial command interface ready!");
@@ -70,6 +92,17 @@ void setup() {
   Serial.println("  drawEllipse|x|y|rx|ry");
   Serial.println("  drawFillEllipse|x|y|rx|ry");
   Serial.println("  flush");
+
+  //init SD card
+  initSDcard();
+
+  // initialize control over the keyboard:
+  #ifdef USE_HID_KEYBOARD
+    Keyboard.begin();
+    USB.begin();
+  #else
+    Serial.println("\nUSE_HID_KEYBOARD not being used");
+  #endif
 }
 
 void loop() {
@@ -86,8 +119,8 @@ void handleTouchScreen(){
     LastTouch.Text = "LT=" + clockString;         //update time on button but dont automatically re-display button
     //LastTouch.updateText("LT=" + clockString);  //update text and display button
 
-    //for now consider the Test and Panel1 to have the same button layout
-    if (curTestPanel == "Test" || curTestPanel == "Panel1")
+    //check for clicks on Panel1
+    if (curTestPanel == "Panel1" || curTestPanel == "Test" )
     {
       //check if our last touch clock button was clicked
       if (LastTouch.checkIfClicked(touchX, touchY)){
@@ -124,12 +157,43 @@ void handleTouchScreen(){
         screen.prt("RGB=" + String(randR) + "," + String(randG) + "," + String(randB),0,20,2);   //print touch coords
         delay(100);
       }
-      //else test for other touches on touchscreen
-      else{
+      else if (ListSdFILES.checkIfClicked(touchX, touchY)){
+        screen.clear(0,0,0);    //set random color
+        displayScreen();
+
+        screen.setColor(50,50,50);            //set background color of rectangle
+        screen.drawFillRect(0, 0, 320, 40);   //clear the status bar
+        screen.setColor(255,100,100);         //set text color
+        screen.prt("Listing SD Files",0,0,2);  //print touch coords
+
+        screen.setColor(255,255,255);          //set background color of rectangle
+        Serial.println("Showing SD files");
+        showSdFilesOnLCD();
+        delay(100);
+      }
+      else if (TestModeBut.checkIfClicked(touchX, touchY)){
+        //ButtonGuiClass TestModeBut  (screenPtr, 325, 160, 150, 28, 255, 255, 255, "TestMode Off", 2);  //PANEL 1 button to make a random background color
+        if (TestModeBut.Text == "TestMode Off"){
+          curTestPanel = "Test";
+          TestModeBut.Text = "TestMode On";
+        }
+        else{
+          curTestPanel = "Panel1";
+          TestModeBut.Text = "TestMode Off";
+        }
+
+        screen.clear(0,0,0);    //set random color
+        screen.setColor(50,50,50);            //set background color of rectangle
+
+        displayScreen();
+        delay(100);
+      }
+      //else test for other touches on touchscreen if in test mode and show keypresses
+      else if (TestModeBut.Text == "TestMode On"){
         Serial.println("Touch Pressed:" + String(touchX) + "," + String(touchY));
         screen.setColor(0,50,100);          //set background color of rectangle
         screen.drawFillRect(0, 0, 320, 40); //we are 480 x 80
-        
+
         screen.setColor(200,255,255);       //set text color
         screen.prt((String(touchX) + "," + String(touchY)),0,0,5);    //print touch coords
 
@@ -145,17 +209,36 @@ void handleTouchScreen(){
         screen.prt("Resetting esp32",0,0,3);  //print touch coords
 
         screen.flush();   //anytime you want the screen to update you have to do a flush
+        getChipReadyForRestart();
         delay(50);
         ESP.restart();    //restart esp32
       }
+      else if (ResetToBL.checkIfClicked(touchX, touchY)){
+        screen.clear(0,0,0);                //black out screen
+        screen.setColor(50,50,50);            //set background color of rectangle
+        screen.drawFillRect(0, 0, 320, 40);   //clear the status bar
+        screen.setColor(255,100,100);         //set text color
+        screen.prt("Entering Bootloader",0,0,2);  //print touch coords
+
+        screen.setColor(255,255,255);         //set text color
+        screen.prt("Esp32 will reboot into bootloader mode and provide an additonal serial port to use to flash device",0,40,2);  //print touch coords
+        screen.flush();   //anytime you want the screen to update you have to do a flush
+        getChipReadyForRestart(); //not really needed
+
+        delay(50);
+        REG_WRITE(RTC_CNTL_OPTION1_REG, 1); // 1 = Force Download Boot JUMP TO BOOTLOADER ON RESETART
+        //esp_restart();  //old call to restart esp32
+        ESP.restart();    //restart esp32
+      }
     }
+
 
     checkPanelChangeButtons();  //do this for all cases as these buttons should be on every screen
 
     screen.flush();             //for all cases after a touch write to screen
     delay(20);                  //Try to prevent multiple touches with a delay
     screen.clearTouchData();    //Try to prevent multiple touches after a delay by clearing touch data
-  }
+  } //end if
 }
 
 //screen flush happens at the end of handleTouchScreen function. touchX & touchY are GLOBAL VARS
@@ -178,10 +261,7 @@ void checkPanelChangeButtons(){
 
 
 void displayScreen(){
-  if (curTestPanel == "Test"){
-    displayTestScreen();
-  }
-  else if (curTestPanel == "Panel1"){
+  if (curTestPanel == "Panel1"){
     panel1Display();
   }
   else if (curTestPanel == "Panel2"){
@@ -189,7 +269,8 @@ void displayScreen(){
   }
   //for unknown case show test screen
   else{
-    panel1Display();
+    //panel1Display();                    //show normal buttons
+    displayTestScreen();
     screen.setColor(50,50,50);          //set background color of rectangle
     screen.drawFillRect(0, 0, 320, 40); //clear the status bar
     screen.setColor(255,100,100);       //set text color
@@ -202,9 +283,6 @@ void panel1Display(){
   screen.prt("Panel 1",0,0,3);   //print touch coords
 
   screen.setColor(255,255,255);       //set text color
-  screen.prt("Random Data 1..........",0,40,2);   //print touch coords
-  screen.prt("Random Data 2..........",0,60,2);   //print touch coords
-  screen.prt("Random Data 3..........",0,80,2);   //print touch coords
   displayPanel1Buttons();
 }
 
@@ -212,7 +290,9 @@ void displayPanel1Buttons(){
   LastTouch.displayButt();            //display the button
   CS.displayButt();                   //redisplay button
   ColorRand.displayButt();            //redisplay button
-  printCurrentClock();                //display clock
+  ListSdFILES.displayButt();
+  TestModeBut.displayButt();
+  printCurrentClock();                //display clock1
   Panel1Button.displayButt();
   Panel2Button.displayButt();
 }
@@ -229,6 +309,7 @@ void panel2Display(){
   screen.prt("Admin Data 5=" + String(random(0,1000)),0,120,2);   //print touch coords
 
   ResetChip.displayButt();            //redisplay button
+  ResetToBL.displayButt();            //redisplay button
   printCurrentClock();                //display clock
   Panel1Button.displayButt();
   Panel2Button.displayButt();
@@ -254,15 +335,11 @@ void displayTestScreen(){
   screen.setColor(50,255,255);               //set text color
   screen.prt("Click on buttons or screen to test functions. Testing the wrap around functon on screen. It should auto wrap",0,220,2);  //print text
   
-  LastTouch.displayButt();            //display the button
-  CS.displayButt();                   //redisplay button
-  ColorRand.displayButt();            //redisplay button
-  printCurrentClock();                //display clock
-  Panel1Button.displayButt();
-  Panel2Button.displayButt();
+  TestModeBut.Text = "TestMode On";
+  displayPanel1Buttons();
 
   //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-  screen.flush(); //update display HAVE TO DO THIS ANYTIME YOU WANT THE SCREEN TO UPDATE! 
+  //screen.flush(); //update display HAVE TO DO THIS ANYTIME YOU WANT THE SCREEN TO UPDATE! 
 }
 
 //should just use the button class for this and update the text
@@ -315,6 +392,97 @@ void displayUptime(){
     
     printCurrentClock();
     screen.flush();
+  }
+}
+
+void pressControlKey(char whichChar){
+  #ifdef USE_HID_KEYBOARD
+    //enter control alt delete
+    Keyboard.press(KEY_LEFT_CTRL);
+    //Keyboard.press(KEY_LEFT_ALT);
+    //Keyboard.press(KEY_DELETE);
+    delay(100);
+    //Keyboard.press('c');
+    Keyboard.press(whichChar);
+    
+    Keyboard.releaseAll();
+    Keyboard.flush();
+    delay(50);
+  #else
+    Serial.println("USE_HID_KEYBOARD not defined in .ino file");
+  #endif
+}
+
+//shut down periphials. Mainly needed for bootloader mode maybe?
+void getChipReadyForRestart(){
+  SD_MMC.end(); //safley shut down SD card when done with it?
+  //screen.end();
+  //Keyboard.end();
+}
+
+void showSdFilesOnLCD(){
+  listDir(SD_MMC, "/", 0, 1);
+}
+
+void initSDcard(){
+  esp_rom_printf("Initialize tf card\n");
+  //SD_MMC.setPins(SD_MMC_CLK, SD_MMC_CMD, SD_MMC_D0);
+
+  if(! SD_MMC.setPins(SD_MMC_CLK, SD_MMC_CMD, SD_MMC_D0)){
+      Serial.println("SD_MMC.setPins change failed!");
+      return;
+  }
+  else{
+    Serial.println("SD_MMC.setPins success!");
+  }
+
+  //bool SDMMCFS::begin(const char *mountpoint, bool mode1bit, bool format_if_mount_failed, int sdmmc_frequency, uint8_t maxOpenFiles) 
+  //if (!SD_MMC.begin()) 
+  //if (!SD_MMC.begin("/sdcard", true)){
+  //if (!SD_MMC.begin("/sdmmc", true, false, 20000))    //original from vendor
+  if (!SD_MMC.begin("/sdcard", true, false, 20000))     //this works
+  {
+    esp_rom_printf("Card Mount Failed\n");
+    return;
+  }
+  else{
+    uint8_t cardType = SD_MMC.cardType();
+
+    if (cardType == CARD_NONE) {
+      Serial.println("No SD_MMC card attached");
+      return;
+    }
+
+    Serial.print("SD_MMC Card Type: ");
+    if (cardType == CARD_MMC) {
+      Serial.println("MMC");
+    } else if (cardType == CARD_SD) {
+      Serial.println("SDSC");
+    } else if (cardType == CARD_SDHC) {
+      Serial.println("SDHC");
+    } else {
+      Serial.println("UNKNOWN");
+    }
+
+    uint64_t cardSize = SD_MMC.cardSize() / (1024 * 1024);
+    Serial.printf("SD_MMC Card Size: %lluMB\n", cardSize);
+
+    listDir(SD_MMC, "/", 0, 0);
+    createDir(SD_MMC, "/mydir");
+    listDir(SD_MMC, "/", 0, 0);
+    removeDir(SD_MMC, "/mydir");
+    listDir(SD_MMC, "/", 2, 0);
+    writeFile(SD_MMC, "/hello.txt", "Hello ");
+    appendFile(SD_MMC, "/hello.txt", "World!\n");
+    readFile(SD_MMC, "/hello.txt");
+    deleteFile(SD_MMC, "/foo.txt");
+    renameFile(SD_MMC, "/hello.txt", "/foo.txt");
+    readFile(SD_MMC, "/foo.txt");
+    testFileIO(SD_MMC, "/test.txt");
+    Serial.printf("Total space: %lluMB\n", SD_MMC.totalBytes() / (1024 * 1024));
+    Serial.printf("Used space: %lluMB\n", SD_MMC.usedBytes() / (1024 * 1024));
+
+    //SD_MMC.end(); //safley shut down SD card when done with it?
   }
 }
 
@@ -486,4 +654,176 @@ void processSerialCommand() {
       Serial.println("Unknown or incomplete command: " + cmd);
     }
   }
+}
+
+/////////////////////////////// SD FUNCTIONS
+void listDir(fs::FS &fs, const char *dirname, uint8_t levels, bool printOnLCD) {
+  //screen.setColor(255,255,255);       //set text color white
+  int currentLcdLine = 45;
+  Serial.printf("Listing directory: %s\n", dirname);
+
+  File root = fs.open(dirname);
+  if (!root) {
+    Serial.println("Failed to open directory");
+    if (printOnLCD){
+      screen.prt("Failed to open directory",0,currentLcdLine,2);   //print touch coords
+    }
+    return;
+  }
+  if (!root.isDirectory()) {
+    Serial.println("Not a directory");
+    if (printOnLCD){
+      screen.prt("Not a directory",0,currentLcdLine,2); 
+    }
+    return;
+  }
+
+  File file = root.openNextFile();
+  while (file) {
+    if (file.isDirectory()) {
+      Serial.print("  DIR : ");
+      Serial.println(file.name());
+      if (printOnLCD){
+        screen.prt("DIR:" + String(file.name()),0,currentLcdLine,1);
+        currentLcdLine = currentLcdLine + 10;
+      }
+
+      if (levels) {
+        listDir(fs, file.path(), levels - 1, printOnLCD);
+      }
+    } else {
+      Serial.print("  FILE: ");
+      Serial.print(file.name());
+      Serial.print("  SIZE: ");
+      Serial.println(file.size());
+
+      if (printOnLCD){
+        screen.prt(String(file.name()) + " size=" + String(file.size()) ,5,currentLcdLine,1); 
+        currentLcdLine = currentLcdLine + 10;
+      }
+    }
+    file = root.openNextFile();
+  }
+}
+
+void createDir(fs::FS &fs, const char *path) {
+  Serial.printf("Creating Dir: %s\n", path);
+  if (fs.mkdir(path)) {
+    Serial.println("Dir created");
+  } else {
+    Serial.println("mkdir failed");
+  }
+}
+
+void removeDir(fs::FS &fs, const char *path) {
+  Serial.printf("Removing Dir: %s\n", path);
+  if (fs.rmdir(path)) {
+    Serial.println("Dir removed");
+  } else {
+    Serial.println("rmdir failed");
+  }
+}
+
+void readFile(fs::FS &fs, const char *path) {
+  Serial.printf("Reading file: %s\n", path);
+
+  File file = fs.open(path);
+  if (!file) {
+    Serial.println("Failed to open file for reading");
+    return;
+  }
+
+  Serial.print("Read from file: ");
+  while (file.available()) {
+    Serial.write(file.read());
+  }
+}
+
+void writeFile(fs::FS &fs, const char *path, const char *message) {
+  Serial.printf("Writing file: %s\n", path);
+
+  File file = fs.open(path, FILE_WRITE);
+  if (!file) {
+    Serial.println("Failed to open file for writing");
+    return;
+  }
+  if (file.print(message)) {
+    Serial.println("File written");
+  } else {
+    Serial.println("Write failed");
+  }
+}
+
+void appendFile(fs::FS &fs, const char *path, const char *message) {
+  Serial.printf("Appending to file: %s\n", path);
+
+  File file = fs.open(path, FILE_APPEND);
+  if (!file) {
+    Serial.println("Failed to open file for appending");
+    return;
+  }
+  if (file.print(message)) {
+    Serial.println("Message appended");
+  } else {
+    Serial.println("Append failed");
+  }
+}
+
+void renameFile(fs::FS &fs, const char *path1, const char *path2) {
+  Serial.printf("Renaming file %s to %s\n", path1, path2);
+  if (fs.rename(path1, path2)) {
+    Serial.println("File renamed");
+  } else {
+    Serial.println("Rename failed");
+  }
+}
+
+void deleteFile(fs::FS &fs, const char *path) {
+  Serial.printf("Deleting file: %s\n", path);
+  if (fs.remove(path)) {
+    Serial.println("File deleted");
+  } else {
+    Serial.println("Delete failed");
+  }
+}
+
+void testFileIO(fs::FS &fs, const char *path) {
+  File file = fs.open(path);
+  static uint8_t buf[512];
+  size_t len = 0;
+  uint32_t start = millis();
+  uint32_t end = start;
+  if (file) {
+    len = file.size();
+    size_t flen = len;
+    start = millis();
+    while (len) {
+      size_t toRead = len;
+      if (toRead > 512) {
+        toRead = 512;
+      }
+      file.read(buf, toRead);
+      len -= toRead;
+    }
+    end = millis() - start;
+    Serial.printf("%zu bytes read for %lu ms\n", flen, end);
+    file.close();
+  } else {
+    Serial.println("Failed to open file for reading");
+  }
+
+  file = fs.open(path, FILE_WRITE);
+  if (!file) {
+    Serial.println("Failed to open file for writing");
+    return;
+  }
+
+  size_t i;
+  start = millis();
+  for (i = 0; i < 2048; i++) {
+    file.write(buf, 512);
+  }
+  end = millis() - start;
+  Serial.printf("%u bytes written for %lu ms\n", 2048 * 512, end);
+  file.close();
 }
