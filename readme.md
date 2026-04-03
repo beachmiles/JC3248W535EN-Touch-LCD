@@ -65,6 +65,10 @@ Set the following arduino settings for the ESP32S3 Dev Module up as follows unde
 - USB Mode: "Hardware CDC and JTAG"
 - Zigbee Mode: "Disabled"
 
+**Note = If Using USB Keyboard and want your Serial device to work through the USB you need to use these 2 settings instead**
+- Upload Mode: "USB-OTG CDC (TinyUSB)"
+- USB Mode: "USB-OTG (TinyUSB)"
+
 ## Usage Examples
 
 <mark>**NOTE: The TouchScreenAndSerialCommands example is prob the best example with the ButtonGuiClass usage**</mark><br>
