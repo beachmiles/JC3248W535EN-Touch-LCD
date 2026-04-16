@@ -9,13 +9,16 @@ class ButtonGuiClass {
 	  //Arduino_GFX *gfx;
     JC3248W535EN *screen;            //The main display variable
 
-    int16_t X;
-    int16_t Y;
-    int16_t W;
-    int16_t H;
-    uint8_t Red_BG;
-    uint8_t Green_BG;
-    uint8_t Blue_BG;
+    int16_t X;          //start of button location x
+    int16_t Y;          //start of button location y
+    int16_t W;          //width of button
+    int16_t H;          //height of button
+    uint8_t Red_FG;     //foreground font color
+    uint8_t Green_FG;   //foreground font color
+    uint8_t Blue_FG;    //foreground font color
+    uint8_t Red_BG;     //background font color
+    uint8_t Green_BG;   //background font color 
+    uint8_t Blue_BG;    //background font color
     uint8_t fontSize;
     String Text;
 
@@ -25,6 +28,9 @@ class ButtonGuiClass {
 
     ButtonGuiClass(JC3248W535EN *screenClass){
       screen = screenClass;
+      Red_BG   = 255;
+      Green_BG = 255;
+      Blue_BG  = 255;
       Text = "TextBox";
     }
 
@@ -41,10 +47,44 @@ class ButtonGuiClass {
       if (Y > screen->height){ Y = screen->height;}
       if (W > screen->width){ W = screen->width;}
       if (H > screen->height){ H = screen->height;}
+      
+      //default font/foreground color to black
+      Red_FG   = 0;
+      Green_FG = 0;
+      Blue_FG  = 0;
 
       Red_BG   = RedBG;
       Green_BG = GreenBG;
       Blue_BG  = BlueBG;
+      Text  = Textt;
+      fontSize = fontSizee;
+    }
+
+    //this one adds font/foreground color setup along with the background color
+    ButtonGuiClass(JC3248W535EN *screenClass, int16_t XX, int16_t YY, int16_t WW, int16_t HH, uint8_t RedBG, uint8_t GreenBG, uint8_t BlueBG, uint8_t RedFG, uint8_t GreenFG, uint8_t BlueFG, String Textt, uint8_t fontSizee)
+    {
+      screen = screenClass;
+      X = XX;
+      Y = YY;
+      W = WW;
+      H = HH;
+
+      //make sure we are within the bounds of the screen
+      if (X > screen->width){ X = screen->width;}
+      if (Y > screen->height){ Y = screen->height;}
+      if (W > screen->width){ W = screen->width;}
+      if (H > screen->height){ H = screen->height;}
+      
+      //font/foreground color
+      Red_FG   = RedBG;
+      Green_FG = GreenBG;
+      Blue_FG  = BlueBG;
+
+      //background color
+      Red_BG   = RedBG;
+      Green_BG = GreenBG;
+      Blue_BG  = BlueBG;
+
       Text  = Textt;
       fontSize = fontSizee;
     }
@@ -54,6 +94,7 @@ class ButtonGuiClass {
       screen->setColor(Red_BG, Green_BG, Blue_BG);
       screen->drawFillRect(X, Y, W, H);
       //screen->setColor(255,255,255); //make white text the default for now
+      //screen->setColor(0,0,0); //make black text the default for now
       screen->setColor(0,0,0); //make black text the default for now
       screen->prt(Text, X + 2, Y + 4, fontSize);
     }
@@ -67,14 +108,56 @@ class ButtonGuiClass {
       // Draw Button 
       screen->setColor(Red_BG, Green_BG, Blue_BG);
       screen->drawFillRect(X, Y, W, H);
-      //screen->setColor(255,255,255); //make white text the default for now
-      screen->setColor(0,0,0); //make black text the default for now
-      screen->prt(Text, X + 2, Y + 4, fontSize);
+      //screen->setColor(255,255,255);              //make white text the default for now
+      screen->setColor(Red_FG, Green_FG, Blue_FG);  //make black text the default for now
+      screen->prt(Text, X + 2, Y + 4, fontSize);    //default the text to offset a little outside the bounds quick and dirty. Should make this change based on font size..
     }
 
     void updateText(String newText){
       Text = newText;
       displayButt();
+    }
+
+    void updateText(String newText, bool updateNow){
+      Text = newText;
+      if (updateNow){
+        displayButt();
+      }
+    }
+
+    //could use this to potentially add some motion to a box
+    void updateButtonLocation(int16_t XX, int16_t YY, int16_t WW, int16_t HH, bool updateNow){
+      X = XX;
+      Y = YY;
+      W = WW;
+      H = HH;
+
+      //make sure we are within the bounds of the screen
+      if (X > screen->width){ X = screen->width;}
+      if (Y > screen->height){ Y = screen->height;}
+      if (W > screen->width){ W = screen->width;}
+      if (H > screen->height){ H = screen->height;}
+      if (updateNow){
+        displayButt();
+      }
+    }
+
+    void updateBackgroundColor(uint8_t RedBG, uint8_t GreenBG, uint8_t BlueBG, bool updateNow){
+      Red_BG   = RedBG;
+      Green_BG = GreenBG;
+      Blue_BG  = BlueBG;
+      if (updateNow){
+        displayButt();
+      }
+    }
+
+    void updateFontColor(uint8_t RedBG, uint8_t GreenBG, uint8_t BlueBG, bool updateNow){
+      Red_FG   = RedBG;
+      Green_FG = GreenBG;
+      Blue_FG  = BlueBG;
+      if (updateNow){
+        displayButt();
+      }
     }
 
     //check if xy click is in our button

@@ -14,7 +14,7 @@
 
 #define TOUCH_PIN_NUM_I2C_SCL 8
 #define TOUCH_PIN_NUM_I2C_SDA 4
-#define TOUCH_PIN_NUM_INT 3
+#define TOUCH_PIN_NUM_INT 3       //may be able to get an interrupt from touches instead of constantly reading i2c to detect touches?
 #define TOUCH_PIN_NUM_RST -1
 
 #define SD_MMC_D0 13
@@ -27,6 +27,6 @@
 #define AUDIO_I2S_LRCK_IO 2   // LCK
 #define AUDIO_I2S_DO_IO 41  // DIN
 
-#define BAT_ADC_PIN 5
+#define BAT_ADC_PIN 5   //can read the voltage of the battery here. There is a resistor dividor that prob maps it to 0-1V
 
 #endif
