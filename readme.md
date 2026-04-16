@@ -202,8 +202,8 @@ This library uses the following default pin configuration for the JC3248W535EN d
 - Backlight: Pin 1
 - Touch SDA: Pin 4
 - Touch SCL: Pin 8
-- Touch RST: Pin 12
-- Touch INT: Pin 11
+- Touch RST: Pin 12 ? GPIO 12 goes to the SD_MMC
+- Touch INT: Pin 3  //This touch interrupt is not pin 11. Its GPIO 3
 
 ## Screen Orientation
 
