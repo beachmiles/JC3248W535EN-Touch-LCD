@@ -58,7 +58,7 @@ Set the following arduino settings for the ESP32S3 Dev Module up as follows unde
 - JTAG Adapter: "Disabled"
 - Arduino Runs On: "Core 1"
 - USB Firmware MSC On Boot: "Disabled"
-- Partition Scheme: "8M with spiffs (3MB APP/1.5MB SPIFFS)"
+- Partition Scheme: "8M with spiffs (3MB APP/1.5MB SPIFFS)" (Can also use Custom if using partitions.csv)
 - PSRAM: "OPI PSRAM"
 - Upload Mode: "UART0 / Hardware CDC"
 - Upload Speed: "921600"
@@ -153,7 +153,9 @@ void setup() {
 }
 
 void loop() {
-  if (screen.getTouchPoint(touchX, touchY)) {
+  //check for touch interrupt. If no touch then immediatly return/continue
+  if (!screen.screenWasTouched ){ continue; }
+  else if (screen.getTouchPoint(touchX, touchY)) {
     // Draw a small circle where touch is detected
     screen.setColor(255, 0, 0);
     screen.drawFillCircle(touchX, touchY, 5);
