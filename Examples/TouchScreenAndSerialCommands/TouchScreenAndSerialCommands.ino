@@ -25,6 +25,18 @@
 // https://spotpear.com/forum-issue/ESP32-S3-3.5-inch-LCD-Captive-TouchScreen-Display-480x320-Tablet-MP3-Video-Weather-Clock.html
 // https://f1atb.fr/home-automation/esp32-s3/esp32-s3-3-5-inch-capacitive-touch-ips-display-setup/
 
+//wifi stuff
+#include <Arduino.h>
+#include <WiFi.h>
+#include <ESPmDNS.h>
+#include <NetworkUdp.h>
+#include <ArduinoOTA.h>
+#include <esp_wifi.h>
+#include "time.h"
+
+#include "userSpecificSetup.h"   //update this to use your wifi and ftp passwords
+
+//touchscreen stuff
 #define USING_TOUCH_INT 1         //lets us know we are using the touch interrupt function instead of polling the i2c bus
 #include <JC3248W535EN-Touch-LCD.h>
 #include "ButtonGuiClass.h"     //uses the JC3248W535EN-Touch-LCD functions
@@ -35,16 +47,6 @@
 #include "pincfg.h"     //our custom pins on the Guition board
 //#include "ff.h"       //try to sync time with SD_MMC
 /////////////// END SD CARD STUFF
-
-//wifi stuff
-#include <WiFi.h>
-#include <esp_wifi.h>
-#include <ESPmDNS.h>
-#include <NetworkUdp.h>
-#include <ArduinoOTA.h>
-#include "time.h"
-
-#include "userSpecificSetup.h"   //update this to use your wifi and ftp passwords
 
 //you can define these in userSpecificSetup.h if you want to use them
 #ifdef USE_FTP_SERVER
@@ -404,6 +406,8 @@ void panel1Display(){
 
   screen.setColor(255,255,255);       //set text color
   displayPanel1Buttons();
+
+  printWifiInfo();
 }
 
 void displayPanel1Buttons(){
@@ -1064,7 +1068,7 @@ void initArduinoOTA(){
   Serial.println("Setting up Arduino OTA");
 
   // Port defaults to 3232
-  ArduinoOTA.setPort(3232);
+  //ArduinoOTA.setPort(3232);
 
   // Hostname defaults to esp3232-[MAC]
   ArduinoOTA.setHostname(esp32Hostname);
@@ -1093,24 +1097,21 @@ void initArduinoOTA(){
         type = "filesystem";
       }
 
+      //isOtaHappening = 1;
       // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
       Serial.println("Start updating " + type);
-      isOtaHappening = 1;
     })
     .onEnd([]() {
       Serial.println("\nEnd");
-      isOtaHappening = 0;
     })
     .onProgress([](unsigned int progress, unsigned int total) {
       if (millis() - last_ota_time > 500) {
         Serial.printf("Progress: %u%%\n", (progress / (total / 100)));
         last_ota_time = millis();
-        isOtaHappening = 1;
       }
     })
     .onError([](ota_error_t error) {
       Serial.printf("Error[%u]: ", error);
-      isOtaHappening = 0;
       if (error == OTA_AUTH_ERROR) {
         Serial.println("Auth Failed");
       } else if (error == OTA_BEGIN_ERROR) {
@@ -1124,7 +1125,9 @@ void initArduinoOTA(){
       }
     });
 
+  Serial.println("Running ArduinoOTA.begin()");
   ArduinoOTA.begin();
+  Serial.println("Done with ArduinoOTA.begin()");
 }
 
 void printLocalTime() {
@@ -1205,7 +1208,7 @@ void printResetReason(){
 void initWifi(){
   //setup wifi
   WiFi.mode(WIFI_STA);
-  WiFi.setHostname(esp32Hostname); 
+  //WiFi.setHostname(esp32Hostname); 
   setMacAddressToBench();
 
   //connect to wifi
@@ -1233,9 +1236,8 @@ void initWifi(){
     screen.prt("IP =" + WiFi.localIP().toString(),0,0,2);  //print touch coords
     screen.prt("Mac=" + String(WiFi.macAddress()),0,20,2);  //print touch coords
 
-    initArduinoOTA();
     syncTimeToNTP();
-    ArduinoOTA.handle();
+    initArduinoOTA();
   }
   else{
     Serial.println("\r\nCould not connect to WIFI");
@@ -1264,6 +1266,32 @@ void initFtpServer(){
       ftpStarted = true;  //this seems like an uncessesary state variable
     }
   #endif
+}
+
+String getCurrentRTCTime() {
+    struct tm timeinfo;
+    if (!getLocalTime(&timeinfo)) {
+        return "Failed to obtain time";
+    }
+    
+    char timeString[20];
+    strftime(timeString, sizeof(timeString), "%Y-%m-%d %H:%M:%S", &timeinfo);
+    return String(timeString);
+}
+
+void printWifiInfo(){
+  screen.setColor(255,255,255);       //set text color
+
+  if (WiFi.status() == WL_CONNECTED){ 
+    screen.prt("Wifi connected to " + String(WIFI_SSID),0,40,2);   //
+  }
+  else{
+    screen.prt("Wifi Not connected to "+ String(WIFI_SSID),0,40,2);   //
+  }
+
+  screen.prt("IP  =" + WiFi.localIP().toString(),0,60,2);   //
+  screen.prt("Mac =" + String(WiFi.macAddress()),0,80,2);   //
+  screen.prt("Time=" + getCurrentRTCTime()      ,0,100,2);   //
 }
 
 void printDebugInfo(){
