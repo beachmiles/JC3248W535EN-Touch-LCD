@@ -20,8 +20,11 @@ public:
     
 	uint16_t width = 480;	//screen width
 	uint16_t height = 320;	//screen height
+
+	volatile static bool screenWasTouched;		//when touch interrupt hits this changes to 1. Service in main .ino and reset to 0 after done
+	static unsigned long nextTouchScreenCheck;	//only allow interrupt to change after this time in millis
 	
-	//prob better to store last touch variables here?
+	//may be better to store last touch variables here?
 	uint16_t xT;
 	uint16_t yT;
 	
@@ -66,10 +69,10 @@ public:
     
     // Touch function returns x and y values back to calling function. 
 	//Prob want to use internal xT, yT variables here?
-    bool getTouchPoint(uint16_t &x, uint16_t &y);
+    bool getTouchPoint(uint16_t &x, uint16_t &y);	//get the touchpoint that was touched
+	void clearTouchData(void);		//try to clear any touch interrupts
+	static void IRAM_ATTR touchISR_Lib(void);	//touch interrupt function
 	
-	void clearTouchData(void);	//try to clear any touch interrupts
-    
     // Make gfx accessible for direct pixel manipulation
     Arduino_Canvas* gfx;			//this is the buffered version
 	//Arduino_GFX *gfx;				//this appears to act the exact same should allow for other example code to be used?
@@ -77,7 +80,7 @@ public:
 private:
     Arduino_ESP32QSPI* bus;
     Arduino_AXS15231B* g;
-    
+	
     uint8_t currentR, currentG, currentB;
     uint16_t currentColor;
 };

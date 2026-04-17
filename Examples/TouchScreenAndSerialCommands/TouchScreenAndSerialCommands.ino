@@ -56,22 +56,7 @@
   #include "FtpServerKey.h"               //Working with 3.0.2 version import our custom esp32 defaults to use SD_MMC, etc. May want to delete the build folder here if C:\Users\<user>\AppData\Local\arduino\sketches if this doesnt take
   #include <SimpleFTPServer.h>            //SimpleFTPServer.h. Working with 3.0.2 version. But file date times do not work
   //#include "SimpleFTPServer_SD_MMC.h"   //SimpleFTPServer_SD_MMC.h I forced to be in SD_MMC mode
-  FtpServer ftpSrv;
-
-  //trying to get right date time in ftp client. right now its 1969. This didnt work
-  /*
-  extern "C" uint32_t get_fattime(void) {
-    struct tm timeinfo;
-    if (!getLocalTime(&timeinfo)) return 0;
-    return    ((uint32_t)(timeinfo.tm_year - 80) << 25)
-            | ((uint32_t)(timeinfo.tm_mon  +  1) << 21)
-            | ((uint32_t)(timeinfo.tm_mday      ) << 16)
-            | ((uint32_t)(timeinfo.tm_hour      ) << 11)
-            | ((uint32_t)(timeinfo.tm_min       ) <<  5)
-            | ((uint32_t)(timeinfo.tm_sec       ) >>  1);
-  }
-  */
-
+  FtpServer ftpSrv;                       //the ftp client is not showing the right date time but the SD Card has the right time
 #endif
 
 //COMPILE FLAGS FROM GOOD ARDUINO SETTINGS
@@ -87,9 +72,12 @@ CPU=240000000L -DARDUINO=10607 -DARDUINO_ESP32S3_DEV -DARDUINO_ARCH_ESP32 -DARDU
 
 //ARDUINO_PARTITION_default_16MB and ARDUINO_NANO_ESP32 DNE
 #if defined(ARDUINO_PARTITION_default_8MB)
-  //THIS IS THE RIGHT SETTING
+  //THIS IS A GOOD SETTING
   //#pragma message("Correct partition 8MB Flash (3MB APP/1.5MB SPIFFS) detected")
+
+//This is the custom partition scheme
 #elif defined(ARDUINO_PARTITION_)
+  //THIS IS A GOOD SETTING
   //#pragma message("Using custom 16MB partiton")
 #else
   #warning "Please select Custom or 8MB Flash (3MB APP/1.5MB SPIFFS) in Arduino Settings and Flash Size 16MB"
@@ -136,7 +124,7 @@ JC3248W535EN screen;                //The main display variable
 JC3248W535EN *screenPtr = &screen;  //Pointer used for button functions
 //Arduino_GFX *gfx = screen.gfx;      //in case anyone want to use direct gfx calls. Will not work seamlessly with "JC3248W535EN screen" as the rotation is different
 
-static const String programVersion = "1.0.4";    //program version
+static const String programVersion = "1.0.5";    //program version
 uint16_t touchX, touchY;            //touch screen variables.
 String curTestPanel = "Test";
 
@@ -148,9 +136,7 @@ String clockString;                  // holds the created time screen. Happens o
 
 bool ftpStarted = false;
 unsigned long last_ota_time = 0;
-unsigned long nextTouchScreenCheck = 0;
 volatile bool isOtaHappening = 0;
-volatile bool screenWasTouched = 0;
 uint8_t cardType = CARD_NONE;       //SD card type
 int sdBootCounter = 1;              //power cycle counter that we read the file off the SD card to.
 
@@ -209,12 +195,15 @@ void handleNetworkTasks(){
 void initAndCheckEspHw(){
   WRITE_PERI_REG(RTC_CNTL_OPTION1_REG, 0);  //ensure we do not stay in the bootloader?
 
-  // 1. Native USB Serial (CDC)
-  Serial.begin(115200);
+  Serial.begin(115200);   // 1. Native USB Serial (CDC)
   //while (!Serial) {delay(10); } //wait for serial monitor to open
 
-  // Hardware UART0  This goes to the physical TX/RX pins or the "UART" USB port
-  Serial0.begin(115200); 
+  #ifdef USE_SERIAL0
+  //The default Serial0 setup should work as it should use the right pins 
+  //Serial0.begin(115200, SERIAL_8N1, HeaderP1_4PIN_PIN3_RXD2, HeaderP1_4PIN_PIN2_TXD2); //Guition Hardware UART. This should go to the physical TX/RX pins out of port 1
+  Serial0.begin(115200);  //
+  #endif
+
   delay(800);             //give some time for terminal app to re-connect
 
   printResetReason();
@@ -231,19 +220,13 @@ void initAndCheckEspHw(){
   }
 }
 
-// Touchscreen Interrupt Service Routine (ISR)
-#ifdef USING_TOUCH_INT
-void IRAM_ATTR touchISR() {
-  if (cur_millis < nextTouchScreenCheck ){ return; }                //dont let an interrupt happen unless we have it armed. This is prob un-needed
-  screenWasTouched = 1; //handle this in handleTouchScreen function
-}
-#endif
-
 void initScreen(){
   // Initialize the screen
   if (!screen.begin()) {
     Serial.println("Screen initialization failed!");
+    #ifdef USE_SERIAL0
     Serial0.println("Serial0 Screen initialization failed!");
+    #endif
     //return;
   }
 
@@ -253,69 +236,17 @@ void initScreen(){
   displayScreen();
   screen.flush(); //update display HAVE TO DO THIS ANYTIME YOU WANT THE SCREEN TO UPDATE! 
   curTestPanel = "Panel1";  //change us to a non test background after any following buttons
-
-  //attach interrupt to touch screen sensor. Add a pullup
-  #ifdef USING_TOUCH_INT
-  pinMode(TOUCH_PIN_NUM_INT, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(TOUCH_PIN_NUM_INT), touchISR, FALLING);
-  #endif
 }
-
-/*
-//need to include this if using this function #include "soc/timer_group_reg.h"
-void reboot_to_bootloaderNUKE(){
-  // 1. Set the Download Boot flag in RTC memory
-  WRITE_PERI_REG(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
-
-  // If a normal restart is hanging, we force a watchdog timeout
-  //*((uint32_t *)0x60000000) = 0; // Intentional null pointer/illegal access to crash
-
-  // 2. Enable the Watchdog Timer to trigger an immediate reset
-  // This feeds the hardware "reset" line directly
-  WRITE_PERI_REG(TIMG_WDTCONFIG0_REG_W0, 0); // Disable protection
-  WRITE_PERI_REG(TIMG_WDTCONFIG0_REG_W0, TIMG_WDT_FLASHBOOT_MOD_EN_S | TIMG_WDT_SYS_RESET_LENGTH_S | TIMG_WDT_CPU_RESET_LENGTH_S | TIMG_WDT_EN_S);
-  WRITE_PERI_REG(TIMG_WDTFEED_REG_W0, 1); // Trigger!
-
-  // The chip will reset here.
-  while(1);
-}
-*/
-
-// This is the recommended way to reboot into the serial bootloader
-void reboot_to_bootloader() {
-  delay(100);
-
-  // 2. Give the serial buffer a moment to breathe
-  Serial.println("Rebooting to Download Mode...");
-  Serial.flush();
-  detachInterrupt(digitalPinToInterrupt(TOUCH_PIN_NUM_INT));    //remove touch interrupt
-  delay(100);
-  
-  // This sets the RTC_CNTL_FORCE_DOWNLOAD_BOOT bit (bit 1) 
-  // in the RTC_CNTL_OPTION1_REG register.
-  WRITE_PERI_REG(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
-
-  // 2. Use the internal 'instant' reset if available
-  // This bypasses the standard esp_restart() hooks
-  esp_reset_reason_t reason = esp_reset_reason();
-
-  // Now restart. The chip will see this bit and jump to the bootloader.
-  esp_restart();  //this isnt restarting properly
-  //ESP.restart();    //new callrestart esp32
-}
-
 
 //Note the touchscreen on this unit doesnt seem to be enabled around the outside edge of the display
 void handleTouchScreen(){
 
-  //check for interrupt should all be what is needed
-  #ifdef USING_TOUCH_INT
-    if (!screenWasTouched ){ return; }      //THIS WORKS! Got the touch interrupt working
-    nextTouchScreenCheck = cur_millis + 30; //arm interrupt 30ms later?
-  #else
-    if (!screenWasTouched && cur_millis < nextTouchScreenCheck ){ return; }   //this works and is a fallback if the interrupt pin is bad
-    else { nextTouchScreenCheck = cur_millis + 30; }  //check every 30ms
-  #endif
+  //check for touch interrupt. If no touch then immediatly return
+  if (!screen.screenWasTouched ){ return; }      //THIS WORKS! Got the touch interrupt working
+  screen.nextTouchScreenCheck = cur_millis + 30; //arm interrupt 30ms later? Prob dont really need this
+
+  //if (!screen.screenWasTouched && cur_millis < screen.nextTouchScreenCheck ){ return; }   //this works and is a fallback if the interrupt pin is bad
+  //else { screen.nextTouchScreenCheck = cur_millis + 30; }  //check every 30ms
 
   //Check if the display was touched. touchX & touchY are GLOBAL VARS. This does a few i2c transactions that could take some time and potentially screw up network functions. 
   //May  only want to check this like once every 10ms maybe?
@@ -323,7 +254,7 @@ void handleTouchScreen(){
     LastTouch.Text = "LT=" + clockString;         //update time on button but dont automatically re-display button
     //LastTouch.updateText("LT=" + clockString);  //update text and display button
 
-    //check for clicks on Panel1
+    // HANDLE CLICKS FOR Panel1 or Test
     if (curTestPanel == "Panel1" || curTestPanel == "Test" )
     {
       //check if our last touch clock button was clicked
@@ -411,49 +342,27 @@ void handleTouchScreen(){
         screen.drawCircleOutline(touchX, touchY, 4);  //print tiny circle where touch happened
       }
     }
+
+    // HANDLE CLICKS FOR Panel2
     else if (curTestPanel == "Panel2"){
       if (ResetChip.checkIfClicked(touchX, touchY)){
-        screen.setColor(50,50,50);            //set background color of rectangle
-        screen.drawFillRect(0, 0, 320, 40);   //clear the status bar
-        screen.setColor(255,100,100);         //set text color
-        screen.prt("Resetting esp32",0,0,3);  //print touch coords
-
-        screen.flush();   //anytime you want the screen to update you have to do a flush
-        getChipReadyForRestart();
-        delay(50);
-        ESP.restart();    //restart esp32
+        resetEsp32();
       }
       else if (ResetToBL.checkIfClicked(touchX, touchY)){
-        screen.clear(0,0,0);                //black out screen
-        screen.setColor(50,50,50);            //set background color of rectangle
-        screen.drawFillRect(0, 0, 320, 40);   //clear the status bar
-        screen.setColor(255,100,100);         //set text color
-        screen.prt("Entering Bootloader",0,0,2);  //print touch coords
-
-        screen.setColor(255,255,255);         //set text color
-        screen.prt("Esp32 will reboot into bootloader mode and provide an additonal serial port to use to flash device",0,40,2);  //print touch coords
-        screen.flush();   //anytime you want the screen to update you have to do a flush
-        getChipReadyForRestart(); //may not really needed
-
-        reboot_to_bootloader();
-
-        //if we get this far just try and stay to potentially handle the OTA
-        while(1){
-          ArduinoOTA.handle();
-        }
+        reboot_to_bootloader();   //reboot to bootloader
       }
     }
 
     checkPanelChangeButtons();  //do this for all cases as these buttons should be on every screen
     screen.flush();             //for all cases after a touch write to screen
 
-    #ifdef USING_TOUCH_INT
+    #ifndef USING_TOUCH_INT
       //prob only need this extra delay and clearing the touch data if we are polling
       delay(20);                  //Try to prevent multiple touches with a dumb delay
       screen.clearTouchData();    //Try to prevent multiple touches after a delay by clearing touch data
     #endif
 
-    screenWasTouched = 0;       //clear touch interrupt variable in case it was hit during the above delays
+    screen.screenWasTouched = 0;       //clear touch interrupt variable in case it was hit during the above delays
   } //end if touch 
 }
 
@@ -1318,6 +1227,12 @@ void initWifi(){
     Serial.print("ESP32 MAC Address: ");
     Serial.println(WiFi.macAddress());
 
+    screen.setColor(50,50,50);            //set background color of rectangle
+    screen.drawFillRect(0, 0, 320, 40);   //clear the status bar
+    screen.setColor(255,255,255);         //set text color
+    screen.prt("IP =" + WiFi.localIP().toString(),0,0,2);  //print touch coords
+    screen.prt("Mac=" + String(WiFi.macAddress()),0,20,2);  //print touch coords
+
     initArduinoOTA();
     syncTimeToNTP();
     ArduinoOTA.handle();
@@ -1391,4 +1306,75 @@ void initKeyboard(){
       Serial0.println("\r\nSerial0 USE_HID_KEYBOARD not being used");
     #endif 
   #endif
+}
+
+/*
+//need to include this if using this function #include "soc/timer_group_reg.h"
+void reboot_to_bootloaderNUKE(){
+  // 1. Set the Download Boot flag in RTC memory
+  WRITE_PERI_REG(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
+
+  // If a normal restart is hanging, we force a watchdog timeout
+  //*((uint32_t *)0x60000000) = 0; // Intentional null pointer/illegal access to crash
+
+  // 2. Enable the Watchdog Timer to trigger an immediate reset
+  // This feeds the hardware "reset" line directly
+  WRITE_PERI_REG(TIMG_WDTCONFIG0_REG_W0, 0); // Disable protection
+  WRITE_PERI_REG(TIMG_WDTCONFIG0_REG_W0, TIMG_WDT_FLASHBOOT_MOD_EN_S | TIMG_WDT_SYS_RESET_LENGTH_S | TIMG_WDT_CPU_RESET_LENGTH_S | TIMG_WDT_EN_S);
+  WRITE_PERI_REG(TIMG_WDTFEED_REG_W0, 1); // Trigger!
+
+  // The chip will reset here.
+  while(1);
+}
+*/
+
+// This is the recommended way to reboot into the serial bootloader
+void reboot_to_bootloader() {
+  screen.clear(0,0,0);                //black out screen
+  screen.setColor(50,50,50);            //set background color of rectangle
+  screen.drawFillRect(0, 0, 320, 40);   //clear the status bar
+  screen.setColor(255,100,100);         //set text color
+  screen.prt("Entering Bootloader",0,0,2);  //print touch coords
+
+  screen.setColor(255,255,255);         //set text color
+  screen.prt("Esp32 will reboot into bootloader mode and provide an additonal serial port to use to flash device",0,40,2);  //print touch coords
+  screen.flush();   //anytime you want the screen to update you have to do a flush
+  
+  getChipReadyForRestart(); //may not really needed
+  delay(100);
+
+  // 2. Give the serial buffer a moment to breathe
+  Serial.println("Rebooting to Download Mode...");
+  Serial.flush();
+  detachInterrupt(digitalPinToInterrupt(TOUCH_PIN_NUM_INT));    //remove touch interrupt
+  delay(100);
+  
+  // This sets the RTC_CNTL_FORCE_DOWNLOAD_BOOT bit (bit 1) 
+  // in the RTC_CNTL_OPTION1_REG register.
+  WRITE_PERI_REG(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
+
+  // 2. Use the internal 'instant' reset if available
+  // This bypasses the standard esp_restart() hooks
+  esp_reset_reason_t reason = esp_reset_reason();
+
+  // Now restart. The chip will see this bit and jump to the bootloader.
+  esp_restart();  //this isnt restarting properly
+  //ESP.restart();    //new callrestart esp32
+
+    //if we get this far just try and stay to potentially handle the OTA
+  while(1){
+    ArduinoOTA.handle();
+  }
+}
+
+void resetEsp32(){
+  screen.setColor(50,50,50);            //set background color of rectangle
+  screen.drawFillRect(0, 0, 320, 40);   //clear the status bar
+  screen.setColor(255,100,100);         //set text color
+  screen.prt("Resetting esp32",0,0,3);  //print touch coords
+
+  screen.flush();   //anytime you want the screen to update you have to do a flush
+  getChipReadyForRestart();
+  delay(50);
+  ESP.restart();    //restart esp32
 }

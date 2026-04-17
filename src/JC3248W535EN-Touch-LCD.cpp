@@ -17,9 +17,13 @@
 #define TOUCH_SDA 4
 #define TOUCH_SCL 8
 #define TOUCH_I2C_CLOCK 400000
-#define TOUCH_RST_PIN 12
-#define TOUCH_INT_PIN 11
+//#define TOUCH_RST_PIN 12		//Dont think this is 12 or exists. Pin 12 is the SD_MMC_CLK pin
+#define TOUCH_PIN_NUM_INT 3			//Touch interrupt pin is I03/3 called TP_INT on guition schematic. This is not GPIO 11!
 #define AXS_MAX_TOUCH_NUMBER 1
+
+// You must define these static members in the .cpp file
+volatile bool JC3248W535EN::screenWasTouched = false;
+unsigned long JC3248W535EN::nextTouchScreenCheck = 0;
 
 JC3248W535EN::JC3248W535EN() {
     bus = new Arduino_ESP32QSPI(45, 47, 21, 48, 40, 39);
@@ -29,7 +33,14 @@ JC3248W535EN::JC3248W535EN() {
     currentColor = 0xFFFF;
 }
 
+void IRAM_ATTR JC3248W535EN::touchISR_Lib(void) {
+  if (millis() < nextTouchScreenCheck ){ return; }    //dont let an interrupt happen unless we have it armed. This is prob un-needed
+  screenWasTouched = 1; //handle this in main .ino  and reset back to 0 when done
+}
+
 bool JC3248W535EN::begin() {
+	//screenWasTouched = nextTouchScreenCheck = 0;
+	
     // Initialize display
     if (!gfx->begin()) return false;
     
@@ -39,18 +50,24 @@ bool JC3248W535EN::begin() {
         digitalWrite(GFX_BL, HIGH);
     }
     
-    // Initialize touch
+    // Initialize touch i2c
     Wire.begin(TOUCH_SDA, TOUCH_SCL);
     Wire.setClock(TOUCH_I2C_CLOCK);
     
     // Configure touch pins
-    pinMode(TOUCH_INT_PIN, INPUT_PULLUP);
+	/*
     pinMode(TOUCH_RST_PIN, OUTPUT);
     digitalWrite(TOUCH_RST_PIN, LOW);
     delay(200);
     digitalWrite(TOUCH_RST_PIN, HIGH);
     delay(200);
-    
+    */
+	delay(400);	//do a dumb delay to match the previous delays
+	
+	//enable interrupt
+	pinMode(TOUCH_PIN_NUM_INT, INPUT_PULLUP);
+	attachInterrupt(digitalPinToInterrupt(TOUCH_PIN_NUM_INT), touchISR_Lib, FALLING);
+  
     gfx->fillScreen(0); // Clear screen
     return true;
 }
@@ -256,8 +273,8 @@ bool JC3248W535EN::getTouchPoint(uint16_t &x, uint16_t &y) {
         if (rawX == 273 && rawY == 273) return false;
         if (rawX > 4000 || rawY > 4000) return false;
         
-        y = map(rawX, 0, height, height, 0);	//appears to transpose the coordinate map so the top left corner is 0,0
-        x = rawY;
+        yT = y = map(rawX, 0, height, height, 0);	//appears to transpose the coordinate map so the top left corner is 0,0
+        xT = x = rawY;
         
 		//add dumb fudge factor for since the top left corner is 14,10 not 0,0 and bottom right is 461,308 not 480,320
 		#ifdef USE_TOUCHSCREEN_FUDGE_FACTOR
