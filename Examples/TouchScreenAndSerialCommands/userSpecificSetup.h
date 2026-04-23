@@ -18,3 +18,4 @@ const uint8_t customMacFirst3Bytes[3] = {0x11, 0x22, 0x33};
 #define USE_FTP_SERVER
 #define USE_SERIAL0
 //#define USE_HID_KEYBOARD    //If this flag is set then use the USB keyboard
+//#define PRINT_SKETCH_DEBUG

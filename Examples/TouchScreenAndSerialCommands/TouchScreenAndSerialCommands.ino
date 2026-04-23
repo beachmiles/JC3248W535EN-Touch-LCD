@@ -36,7 +36,7 @@
 
 #include "userSpecificSetup.h"   //update this to use your wifi and ftp passwords
 
-//touchscreen stuff
+//touchscreen stuff. If battery is connected and USB at the same time I was getting some erratic touches but otherwise USING_TOUCH_INT 1 is solid1
 #define USING_TOUCH_INT 1         //lets us know we are using the touch interrupt function instead of polling the i2c bus
 #include <JC3248W535EN-Touch-LCD.h>
 #include "ButtonGuiClass.h"     //uses the JC3248W535EN-Touch-LCD functions
@@ -87,6 +87,7 @@ CPU=240000000L -DARDUINO=10607 -DARDUINO_ESP32S3_DEV -DARDUINO_ARCH_ESP32 -DARDU
 
 #if !defined(BOARD_HAS_PSRAM)
   #error "PSRAM is not enabled! Enable OPI PSRAM Tools > PSRAM."
+  //#warning "PSRAM is not enabled! Enable OPI PSRAM Tools > PSRAM."
 #elif !defined(CONFIG_SPIRAM_MODE_OCT)
   #error "Wrong PSRAM mode! Please select 'OPI PSRAM' in the Tools menu."
 #else
@@ -126,7 +127,7 @@ JC3248W535EN screen;                //The main display variable
 JC3248W535EN *screenPtr = &screen;  //Pointer used for button functions
 //Arduino_GFX *gfx = screen.gfx;      //in case anyone want to use direct gfx calls. Will not work seamlessly with "JC3248W535EN screen" as the rotation is different
 
-static const String programVersion = "1.0.5";    //program version
+static const String programVersion = "1.0.6";    //program version
 uint16_t touchX, touchY;            //touch screen variables.
 String curTestPanel = "Test";
 
@@ -136,11 +137,26 @@ static unsigned long targetTime = 0; // next action time for clock
 unsigned long cur_millis;
 String clockString;                  // holds the created time screen. Happens once a second
 
+uint8_t systemInitState = 0;
+bool wifiStarted = false;
 bool ftpStarted = false;
-unsigned long last_ota_time = 0;
+bool ntpSynced = false;
+bool otaSetup = false;
+bool screenWorking = false;
+unsigned long last_ota_time = 0; 
 volatile bool isOtaHappening = 0;
+unsigned long nextNetworkConfigCheck = 0;
 uint8_t cardType = CARD_NONE;       //SD card type
 int sdBootCounter = 1;              //power cycle counter that we read the file off the SD card to.
+float batteryVoltage = 0;
+float batteryVoltageAtStartup = 0;
+
+//The datasheet says resistor divider R26=33K and R27=100K and R25=0ohms going to GPIO5. 
+//Taking a pic of board showed R26=683 and R27=01D so R26=68K and R27=100K
+//I measured R26=58k R27=80.5K R25=2.31V with a 3.91V being read at R26 w battery attached. (These resistor reads were not solid and constantly rising for some reason!)
+//const float dividerRatio = 1.33; // Divider Ratio: (33k + 100k) / 100k = 1.33 . 
+//const float dividerRatio = 1.72; // Actual measured: (58k + 80.5k) / 80.5k
+const float dividerRatio = 1.68; // Actual resistors: R26=68k, R27=100k
 
 //Test and Panel 1 buttons
 ButtonGuiClass LastTouch    (screenPtr, 325, 40, 150, 28, 255, 100, 100, "Last Touch", 2);   //PANEL 1 button showing the last touch time
@@ -161,7 +177,9 @@ void setup() {
   initScreen();
   printDebugInfo();
   initKeyboard();
-  initWifi();
+  initWifi(0);
+  syncTimeToNTP(0);
+  initArduinoOTA(0);
   initSDcard();  //init SD card after connecting to wifi and syncing time with NTP   
   incrementBootCounterOnSdCard();
   initFtpServer();
@@ -172,26 +190,6 @@ void loop() {
   handleTouchScreen();
   displayUptime();
   handleNetworkTasks();
-}
-
-void handleNetworkTasks(){
-    ArduinoOTA.handle();      //run regardless of wifi connection?
-
-    if (WiFi.status() == WL_CONNECTED){ 
-      #ifdef USE_FTP_SERVER
-        if (ftpStarted) {
-          ftpSrv.handleFTP();
-        }
-        else{
-          //Restart FTP server or try to re-connect to wifi here?
-        }
-      #endif
-
-      //dedicate CPU to just handling OTA only once started to avoid OTA issue
-      while (isOtaHappening){
-          ArduinoOTA.handle();
-      }
-    }
 }
 
 void initAndCheckEspHw(){
@@ -216,9 +214,54 @@ void initAndCheckEspHw(){
 
   if (psramFound()) {
     //Serial.printf("PSRAM available! Size: %d bytes\r\n", ESP.getPsramSize());
-    Serial.println("PSRAM available! Size=" + String(ESP.getFlashChipSize() / 1024 / 1024) + "MB");
+    Serial.println("PSRAM available! Size=" + String(ESP.getPsramSize() / 1024 / 1024) + "MB");
   } else {
-    Serial.println("ERROR PSRAM not detected!!!!!!");
+    Serial.println("PSRAM not detected from psramFound function. Change PSRAM to OPI mode to enable");
+  }
+
+  initADC();
+}
+
+void initADC(){
+  //Init ADC for "BAT_ADC_PIN" on GPIO 5
+  pinMode(BAT_ADC_PIN, INPUT);  // explicitly set input, no pullup. This may be needed
+
+  //Attenuation: To measure 3100mV, use ADC_ATTEN_DB_11 or ADC_ATTEN_DB_12. This acts like an internal voltage divider.
+  //analogSetAttenuation(ADC_ATTENDB_MAX); //Sets the attenuation globally for all ADC pins. To measure higher voltages (up to ~3.1V), the range is typically limited to ~1.1V. 
+  analogSetPinAttenuation(BAT_ADC_PIN, ADC_ATTENDB_MAX);  //may not need this as well? ADC_ATTENDB_MAX or ADC_ATTEN_DB_11
+
+  //Unlike the original ESP32, the ESP32-S3 includes analogReadMilliVolts(), which uses factory-burned eFuse calibration values to provide accurate voltage readings (0–3100 mV)
+  //ADC Default for esp32-S3 is 12bits, but you can manually set it (9-13 bits) but will need to do oversampling to get true 13 bits of data
+  analogReadResolution(12);   //Sets range to 0-4095
+  //analogReadResolution(13); //Sets range to 0-8191
+  delay(1);                   //do a dummy delay
+
+  readBatteryVoltage(1);
+  batteryVoltageAtStartup = batteryVoltage; //save initial battery voltage reading
+}
+
+//NOTE IF USB is connected with power this voltage will be the charger output ~4.2V. 
+//I am reading ~4.13V with my setup with USB connected. Only when running on battery power alone will you see the actual battery voltage.
+//The datasheet says resistor divider R26=33K and R27=100K and R25=0ohms going to GPIO5. 
+//Taking a pic of board showed R26=683 and R27=01D so R26=68K and R27=100K
+//I measured R26=58k R27=80.5K R25=2.31V with a 3.91V being read at R26 w battery attached. (These resistor reads were not solid and constantly rising for some reason!)
+void readBatteryVoltage(bool printOutput){
+  //Read the raw ADC value (0-4095)
+  //int rawValue = analogRead(BAT_ADC_PIN);
+  //float batteryVoltage3 = (rawValue / 4095.0) * 3.1 * dividerRatio;
+
+  // Read calibrated millivolts at the pin (0 - 3158mV)
+  // This automatically uses internal eFuse calibration for better accuracy
+  uint32_t pinMV = analogReadMilliVolts(BAT_ADC_PIN);
+
+  // Convert back to the source voltage (0 - 4200mV)
+  batteryVoltage = (pinMV * dividerRatio) / 1000.0; 
+
+  if (printOutput){
+    Serial.printf("Battery voltage RawPin=%u mV | Adjusted Voltage=%.3f V\r\n", pinMV, batteryVoltage);
+    #ifdef USE_SERIAL0
+      Serial0.printf("Battery voltage RawPin=%u mV | Adjusted Voltage=%.3f V\r\n", pinMV, batteryVoltage);
+    #endif
   }
 }
 
@@ -227,28 +270,36 @@ void initScreen(){
   if (!screen.begin()) {
     Serial.println("Screen initialization failed!");
     #ifdef USE_SERIAL0
-    Serial0.println("Serial0 Screen initialization failed!");
+      Serial0.println("Serial0 Screen initialization failed!");
     #endif
-    //return;
-  }
 
-  //gfx->setRotation(1);  //If using other gfx libaries prob need to do this. You have to use one or the other unfortuantly currently as setting this breaks what the guy did to get the Arduino_Canvas working on this board
-  //curTestPanel = "Panel1";
-  curTestPanel = "Test";    //default to test mode
-  displayScreen();
-  screen.flush(); //update display HAVE TO DO THIS ANYTIME YOU WANT THE SCREEN TO UPDATE! 
-  curTestPanel = "Panel1";  //change us to a non test background after any following buttons
+    screenWorking = 0;  //screen is NOT working flag
+  }
+  else{
+    screenWorking = 1;  //screen IS working flag
+
+    //gfx->setRotation(1);  //If using other gfx libaries prob need to do this. You have to use one or the other unfortuantly currently as setting this breaks what the guy did to get the Arduino_Canvas working on this board
+    //curTestPanel = "Panel1";
+    curTestPanel = "Test";    //default to test mode
+    displayScreen(1);
+    screen.flush(); //update display HAVE TO DO THIS ANYTIME YOU WANT THE SCREEN TO UPDATE! 
+    curTestPanel = "Panel1";  //change us to a non test background after any following buttons
+  }
 }
 
 //Note the touchscreen on this unit doesnt seem to be enabled around the outside edge of the display
 void handleTouchScreen(){
 
-  //check for touch interrupt. If no touch then immediatly return
-  if (!screen.screenWasTouched ){ return; }      //THIS WORKS! Got the touch interrupt working
-  screen.nextTouchScreenCheck = cur_millis + 30; //arm interrupt 30ms later? Prob dont really need this
+  //check if there was a touch interrupt. If no touch then immediatly return
+  #ifdef USING_TOUCH_INT
+    if (!screen.screenWasTouched ){ return; }      //THIS WORKS! Got the touch interrupt working
+    screen.nextTouchScreenCheck = cur_millis + 30; //arm interrupt 30ms later? Prob dont really need this
+  #else
+    if (!screen.screenWasTouched && cur_millis < screen.nextTouchScreenCheck ){ return; }   //this works and is a fallback if the interrupt pin is bad
+    else { screen.nextTouchScreenCheck = cur_millis + 30; }  //check every 30ms
+  #endif
 
-  //if (!screen.screenWasTouched && cur_millis < screen.nextTouchScreenCheck ){ return; }   //this works and is a fallback if the interrupt pin is bad
-  //else { screen.nextTouchScreenCheck = cur_millis + 30; }  //check every 30ms
+  if (!screenWorking){ return; }
 
   //Check if the display was touched. touchX & touchY are GLOBAL VARS. This does a few i2c transactions that could take some time and potentially screw up network functions. 
   //May  only want to check this like once every 10ms maybe?
@@ -276,8 +327,7 @@ void handleTouchScreen(){
       //check if our clear screen button was clicked
       else if (CS.checkIfClicked(touchX, touchY)){
         screen.clear(0,0,0);                //black out screen
-        //displayScreen();
-        displayPanel1Buttons();
+        displayPanel1Buttons(1);
 
         screen.setColor(50,50,50);          //set background color of rectangle
         screen.drawFillRect(0, 0, 320, 40); //clear the status bar
@@ -290,7 +340,7 @@ void handleTouchScreen(){
         uint8_t randG = random(0, 255);
         uint8_t randB = random(0, 255);
         screen.clear(randR,randG,randB);    //set random color
-        displayScreen();
+        displayScreen(1);
 
         screen.setColor(50,50,50);          //set background color of rectangle
         screen.drawFillRect(0, 0, 320, 40); //clear the status bar
@@ -301,7 +351,7 @@ void handleTouchScreen(){
       }
       else if (ListSdFILES.checkIfClicked(touchX, touchY)){
         screen.clear(0,0,0);    //set random color
-        displayScreen();
+        displayScreen(0);
 
         screen.setColor(50,50,50);            //set background color of rectangle
         screen.drawFillRect(0, 0, 320, 40);   //clear the status bar
@@ -311,7 +361,9 @@ void handleTouchScreen(){
 
         screen.setColor(255,255,255);          //set background color of rectangle
         Serial.println("Showing SD files");
-        showSdFilesOnLCD();
+        if (screenWorking){
+          showSdFilesOnLCD();
+        }
         delay(100);
       }
       else if (TestModeBut.checkIfClicked(touchX, touchY)){
@@ -328,7 +380,7 @@ void handleTouchScreen(){
         screen.clear(0,0,0);    //set random color
         screen.setColor(50,50,50);            //set background color of rectangle
 
-        displayScreen();
+        displayScreen(1);
         delay(100);
       }
       //else test for other touches on touchscreen if in test mode and show keypresses
@@ -374,25 +426,27 @@ void checkPanelChangeButtons(){
     curTestPanel = "Panel1";
     screen.clear(5, 50, 50); //clear background to a dark blue
     //screen.flush();   //for all cases after a touch write to screen
-    displayScreen();
+    displayScreen(1);
     delay(50);
   }
   else if (Panel2Button.checkIfClicked(touchX, touchY)){
     curTestPanel = "Panel2";
     screen.clear(0, 0, 0); //clear background to BLACK
     //screen.flush();   //for all cases after a touch write to screen
-    displayScreen();
+    displayScreen(1);
     delay(50);
   }
 }
 
 
-void displayScreen(){
+void displayScreen(int whatToDisplay){
+  if (!screenWorking){ return; }
+
   if (curTestPanel == "Panel1"){
-    panel1Display();
+    panel1Display(whatToDisplay);
   }
   else if (curTestPanel == "Panel2"){
-    panel2Display();
+    panel2Display(whatToDisplay);
   }
   //for unknown case show test screen
   else{
@@ -400,17 +454,23 @@ void displayScreen(){
   }
 }
 
-void panel1Display(){
+void panel1Display(int whatToDisplay){
   screen.setColor(100,255,255);       //set text color
   screen.prt("Panel 1",0,0,3);   //print touch coords
 
   screen.setColor(255,255,255);       //set text color
-  displayPanel1Buttons();
+  displayPanel1Buttons(whatToDisplay);
 
-  printWifiInfo();
+  //if we want a clear display pass 0
+  if (whatToDisplay > 0){
+    printWifiInfo();
+    //readBatteryVoltage(1);
+    //screen.prt("BattVoltage =" + String(batteryVoltage,3)          +  " V"   ,0,240,2);   //
+    //screen.prt("StartVoltage=" + String(batteryVoltageAtStartup,3) +  " V"   ,0,260,2);   //
+  }
 }
 
-void displayPanel1Buttons(){
+void displayPanel1Buttons(int whatToDisplay){
   LastTouch.displayButt();            //display the button
   CS.displayButt();                   //redisplay button
   ColorRand.displayButt();            //redisplay button
@@ -421,7 +481,7 @@ void displayPanel1Buttons(){
   Panel2Button.displayButt();
 }
 
-void panel2Display(){
+void panel2Display(int whatToDisplay){
   screen.setColor(100,255,255);       //set text color
   screen.prt("Admin Settings",0,0,3);   //print touch coords
 
@@ -460,7 +520,7 @@ void displayTestScreen(){
   screen.prt("Click on buttons or screen to test functions. Testing the wrap around functon on screen. It should auto wrap",0,220,2);  //print text
   
   TestModeBut.Text = "TestMode On";
-  displayPanel1Buttons();
+  displayPanel1Buttons(1);
 
   //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   //screen.flush(); //update display HAVE TO DO THIS ANYTIME YOU WANT THE SCREEN TO UPDATE! 
@@ -514,15 +574,27 @@ void displayUptime(){
     }
     clockString = clockString + ss;
 
-    //every 10 seconds output uptime to serial 
-    if (ss % 10 == 0){
-      Serial.println(clockString);
+    //every 5 seconds output uptime to serial 
+    if (ss % 5 == 0){
+      Serial.print(clockString + " ");
       Serial0.println("Serial0-" + clockString);
+      readBatteryVoltage(1);
+      screen.setColor(0,0,0);               //set background color of rectangle
+      screen.drawFillRect(0, 240, 240, 40); //we are 480 x 80
+      screen.setColor(200,255,255);         //set background color of rectangle
+      screen.prt("BattVoltage =" + String(batteryVoltage,3)          +  " V"   ,0,240,2);   //
+      screen.prt("StartVoltage=" + String(batteryVoltageAtStartup,3) +  " V"   ,0,260,2);   //
     }
-    printCurrentClock();
-    screen.flush();
+
+    if (!screenWorking){
+      return;
+    }
+    else{
+      printCurrentClock();
+      screen.flush();
+    }
   }
-}
+} //end displayUptime
 
 void pressControlKey(char whichChar){
   #ifdef USE_HID_KEYBOARD
@@ -1064,70 +1136,78 @@ void testFileIO(fs::FS &fs, const char *path) {
 }
 
 
-void initArduinoOTA(){
-  Serial.println("Setting up Arduino OTA");
+void initArduinoOTA(bool forceSetup){
+  if (WiFi.status() == WL_CONNECTED){ 
+    if (!otaSetup || forceSetup)
+    {
+      Serial.println("Setting up Arduino OTA");
 
-  // Port defaults to 3232
-  //ArduinoOTA.setPort(3232);
+      // Port defaults to 3232
+      //ArduinoOTA.setPort(3232);
 
-  // Hostname defaults to esp3232-[MAC]
-  ArduinoOTA.setHostname(esp32Hostname);
+      // Hostname defaults to esp3232-[MAC]
+      ArduinoOTA.setHostname(esp32Hostname);
 
-  // Password can be set with plain text (will be hashed internally)
-  // The authentication uses PBKDF2-HMAC-SHA256 with 10,000 iterations
-  // ArduinoOTA.setPassword("admin");
+      // Password can be set with plain text (will be hashed internally)
+      // The authentication uses PBKDF2-HMAC-SHA256 with 10,000 iterations
+      ArduinoOTA.setPassword("admin");
 
-  // Or set password with pre-hashed value (SHA256 hash of "admin")
-  // SHA256(admin) = 8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918
-  // ArduinoOTA.setPasswordHash("8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918");
+      // Or set password with pre-hashed value (SHA256 hash of "admin")
+      // SHA256(admin) = 8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918
+      // ArduinoOTA.setPasswordHash("8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918");
 
-  if (!MDNS.begin(esp32Hostname)) {
-    Serial.println("Error setting up MDNS responder!");
+      if (!MDNS.begin(esp32Hostname)) {
+        Serial.println("Error setting up MDNS responder!");
+      }
+      else{
+        Serial.println("Started MDNS responder!");
+      }
+
+      ArduinoOTA
+        .onStart([]() {
+          String type;
+          if (ArduinoOTA.getCommand() == U_FLASH) {
+            type = "sketch";
+          } else {  // U_SPIFFS
+            type = "filesystem";
+          }
+
+          //isOtaHappening = 1;
+          // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
+          Serial.println("Start updating " + type);
+        })
+        .onEnd([]() {
+          Serial.println("\nEnd");
+        })
+        .onProgress([](unsigned int progress, unsigned int total) {
+          if (millis() - last_ota_time > 500) {
+            Serial.printf("Progress: %u%%\n", (progress / (total / 100)));
+            last_ota_time = millis();
+          }
+        })
+        .onError([](ota_error_t error) {
+          Serial.printf("Error[%u]: ", error);
+          if (error == OTA_AUTH_ERROR) {
+            Serial.println("Auth Failed");
+          } else if (error == OTA_BEGIN_ERROR) {
+            Serial.println("Begin Failed");
+          } else if (error == OTA_CONNECT_ERROR) {
+            Serial.println("Connect Failed");
+          } else if (error == OTA_RECEIVE_ERROR) {
+            Serial.println("Receive Failed");
+          } else if (error == OTA_END_ERROR) {
+            Serial.println("End Failed");
+          }
+        });
+
+      Serial.println("Running ArduinoOTA.begin()");
+      ArduinoOTA.begin();
+      otaSetup = 1;
+    }
   }
   else{
-    Serial.println("Started MDNS responder!");
+    //Serial.println("Wifi not connected. Not starting Arduino OTA");
   }
-
-  ArduinoOTA
-    .onStart([]() {
-      String type;
-      if (ArduinoOTA.getCommand() == U_FLASH) {
-        type = "sketch";
-      } else {  // U_SPIFFS
-        type = "filesystem";
-      }
-
-      //isOtaHappening = 1;
-      // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
-      Serial.println("Start updating " + type);
-    })
-    .onEnd([]() {
-      Serial.println("\nEnd");
-    })
-    .onProgress([](unsigned int progress, unsigned int total) {
-      if (millis() - last_ota_time > 500) {
-        Serial.printf("Progress: %u%%\n", (progress / (total / 100)));
-        last_ota_time = millis();
-      }
-    })
-    .onError([](ota_error_t error) {
-      Serial.printf("Error[%u]: ", error);
-      if (error == OTA_AUTH_ERROR) {
-        Serial.println("Auth Failed");
-      } else if (error == OTA_BEGIN_ERROR) {
-        Serial.println("Begin Failed");
-      } else if (error == OTA_CONNECT_ERROR) {
-        Serial.println("Connect Failed");
-      } else if (error == OTA_RECEIVE_ERROR) {
-        Serial.println("Receive Failed");
-      } else if (error == OTA_END_ERROR) {
-        Serial.println("End Failed");
-      }
-    });
-
-  Serial.println("Running ArduinoOTA.begin()");
-  ArduinoOTA.begin();
-  Serial.println("Done with ArduinoOTA.begin()");
 }
 
 void printLocalTime() {
@@ -1141,23 +1221,28 @@ void printLocalTime() {
   }
 }
 
-void syncTimeToNTP(){
+void syncTimeToNTP(bool forceSync){
+  if (!ntpSynced || forceSync){
 
-  // Sync time with NTP server using basic setup
-  //configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+    if (WiFi.status() == WL_CONNECTED){ 
+      // Sync time with NTP server using basic setup
+      //configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+      // Set timezone and sync with NTP
+      configTzTime(posixTZ, ntpServer);
 
-  // Set timezone and sync with NTP
-  configTzTime(posixTZ, ntpServer);
+      // Wait until time is synced
+      Serial.print("Syncing time. ");
+      struct tm timeinfo;
+      while (!getLocalTime(&timeinfo)) {
+        delay(500); Serial.print(".");
+      }
 
-  // Wait until time is synced
-  Serial.print("Syncing time. ");
-  struct tm timeinfo;
-  while (!getLocalTime(&timeinfo)) {
-    delay(500); Serial.print(".");
+      ntpSynced = true;
+      Serial.println("Time synced!");
+      delay(10);
+      printLocalTime();
+    }
   }
-  Serial.println("Time synced!");
-  delay(10);
-  printLocalTime();
 }
 
 void setMacAddressToBench(){
@@ -1188,38 +1273,49 @@ void setMacAddressToBench(){
 
 void printResetReason(){
   esp_reset_reason_t theResetReason = esp_reset_reason();
+  String resetReasonStr = "Reset Reason=";
 
-  Serial.print("Reset Reason=");
   switch (theResetReason) {
-    case ESP_RST_POWERON:  Serial.println("Power-on reset"); break;
-    case ESP_RST_EXT:      Serial.println("Reset by external pin"); break;
-    case ESP_RST_SW:       Serial.println("Software reset (esp_restart)"); break;
-    case ESP_RST_PANIC:    Serial.println("Exception/panic reset"); break;
-    case ESP_RST_INT_WDT:  Serial.println("Interrupt Watchdog reset"); break;
-    case ESP_RST_TASK_WDT: Serial.println("Task Watchdog reset"); break;
-    case ESP_RST_WDT:      Serial.println("Other Watchdog reset"); break;
-    case ESP_RST_DEEPSLEEP:Serial.println("Wakeup from deep sleep"); break;
-    case ESP_RST_BROWNOUT: Serial.println("Brownout reset"); break;
-    case ESP_RST_SDIO:     Serial.println("Reset over SDIO"); break;
-    default:               Serial.println("Other/Unknown"); break;
+    case ESP_RST_POWERON:  resetReasonStr = resetReasonStr + "Power-on reset"; break;
+    case ESP_RST_EXT:      resetReasonStr = resetReasonStr + "Reset by external pin"; break;
+    case ESP_RST_SW:       resetReasonStr = resetReasonStr + "Software reset (esp_restart)"; break;
+    case ESP_RST_PANIC:    resetReasonStr = resetReasonStr + "Exception/panic reset"; break;
+    case ESP_RST_INT_WDT:  resetReasonStr = resetReasonStr + "Interrupt Watchdog reset"; break;
+    case ESP_RST_TASK_WDT: resetReasonStr = resetReasonStr + "Task Watchdog reset"; break;
+    case ESP_RST_WDT:      resetReasonStr = resetReasonStr + "Other Watchdog reset"; break;
+    case ESP_RST_DEEPSLEEP:resetReasonStr = resetReasonStr + "Wakeup from deep sleep"; break;
+    case ESP_RST_BROWNOUT: resetReasonStr = resetReasonStr + "Brownout reset"; break;
+    case ESP_RST_SDIO:     resetReasonStr = resetReasonStr + "Reset over SDIO"; break;
+    default:               resetReasonStr = resetReasonStr + "Other/Unknown"; break;
   }
+
+  Serial.println("\r\n-----------------------------------------------------------------------");
+  Serial.println(resetReasonStr);
+  #ifdef USE_SERIAL0
+    Serial0.println("\r\n-----------------------------------------------------------------------");
+    Serial0.println(resetReasonStr);
+  #endif
 }
 
-void initWifi(){
-  //setup wifi
-  WiFi.mode(WIFI_STA);
-  //WiFi.setHostname(esp32Hostname); 
-  setMacAddressToBench();
+void initWifi(bool forceSetup){
 
-  //connect to wifi
-  Serial.print("Connecting to WiFi=" + String(WIFI_SSID));
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  if (WiFi.status() != WL_CONNECTED || forceSetup){ 
+    //setup wifi
+    WiFi.mode(WIFI_STA);
+    //WiFi.setHostname(esp32Hostname); 
+    setMacAddressToBench();
 
-  // Wait for connection
-  uint32_t started = millis();
-  while (WiFi.status() != WL_CONNECTED && (millis() - started) < 20000) {
-    delay(500);
-    Serial.print('.');
+    //connect to wifi
+    Serial.print("Connecting to WiFi=" + String(WIFI_SSID));
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    wifiStarted = true;
+
+    // Wait for connection
+    uint32_t started = millis();
+    while (WiFi.status() != WL_CONNECTED && (millis() - started) < 20000) {
+      delay(500);
+      Serial.print('.');
+    }
   }
 
   if (WiFi.status() == WL_CONNECTED){ 
@@ -1230,14 +1326,7 @@ void initWifi(){
     Serial.print("ESP32 MAC Address: ");
     Serial.println(WiFi.macAddress());
 
-    screen.setColor(50,50,50);            //set background color of rectangle
-    screen.drawFillRect(0, 0, 320, 40);   //clear the status bar
-    screen.setColor(255,255,255);         //set text color
-    screen.prt("IP =" + WiFi.localIP().toString(),0,0,2);  //print touch coords
-    screen.prt("Mac=" + String(WiFi.macAddress()),0,20,2);  //print touch coords
-
-    syncTimeToNTP();
-    initArduinoOTA();
+    displayWifiInfoInTopLeftCorner();
   }
   else{
     Serial.println("\r\nCould not connect to WIFI");
@@ -1255,12 +1344,12 @@ void initFtpServer(){
       Serial.println("SimpleFTP Storage type is NOT in SD_MMC mode. This is bad");
     }
 
-    // setup callbacks and start ftp server
-    ftpSrv.setCallback(ftpStatusCallback);
-    ftpSrv.setTransferCallback(ftpTransferCallback);
-    
     //start FTP server if we have a sdcard attached
     if (cardType != CARD_NONE) {
+      // setup callbacks and start ftp server
+      ftpSrv.setCallback(ftpStatusCallback);
+      ftpSrv.setTransferCallback(ftpTransferCallback);  
+
       Serial.println("Starting FTP server...");
       ftpSrv.begin(FTP_USER, FTP_PASS);
       ftpStarted = true;  //this seems like an uncessesary state variable
@@ -1279,42 +1368,58 @@ String getCurrentRTCTime() {
     return String(timeString);
 }
 
+void displayWifiInfoInTopLeftCorner(){
+  if (screenWorking)
+  {
+    screen.setColor(50,50,50);            //set background color of rectangle
+    screen.drawFillRect(0, 0, 320, 40);   //clear the status bar
+    screen.setColor(255,255,255);         //set text color
+    screen.prt("IP =" + WiFi.localIP().toString(),0,0,2);  //print touch coords
+    screen.prt("Mac=" + String(WiFi.macAddress()),0,20,2);  //print touch coords
+  }
+}
+
 void printWifiInfo(){
-  screen.setColor(255,255,255);       //set text color
+  if (screenWorking)
+  {
+    screen.setColor(255,255,255);       //set text color
 
-  if (WiFi.status() == WL_CONNECTED){ 
-    screen.prt("Wifi connected to " + String(WIFI_SSID),0,40,2);   //
-  }
-  else{
-    screen.prt("Wifi Not connected to "+ String(WIFI_SSID),0,40,2);   //
-  }
+    if (WiFi.status() == WL_CONNECTED){ 
+      screen.prt("Wifi connected to " + String(WIFI_SSID),0,40,2);   //
+    }
+    else{
+      screen.prt("Wifi Not connected to "+ String(WIFI_SSID),0,40,2);   //
+    }
 
-  screen.prt("IP  =" + WiFi.localIP().toString(),0,60,2);   //
-  screen.prt("Mac =" + String(WiFi.macAddress()),0,80,2);   //
-  screen.prt("Time=" + getCurrentRTCTime()      ,0,100,2);   //
+    screen.prt("IP  =" + WiFi.localIP().toString(),0,60,2);   //
+    screen.prt("Mac =" + String(WiFi.macAddress()),0,80,2);   //
+    screen.prt("Time=" + getCurrentRTCTime()      ,0,100,2);   //
+  }
 }
 
 void printDebugInfo(){
-  // Print available serial commands
-  Serial.println("Available commands (format: command|param1|param2|...):");
-  Serial.println("  prt|text|x|y|size");
-  Serial.println("  clear|r|g|b");
-  Serial.println("  setColor|r|g|b");
-  Serial.println("  drawQRCode|data|x|y|moduleSize|bgR|bgG|bgB|fgR|fgG|fgB");
-  Serial.println("  drawFillRect|x|y|w|h");
-  Serial.println("  drawRect|x|y|w|h");
-  Serial.println("  drawLine|x0|y0|x1|y1");
-  Serial.println("  drawFillCircle|x|y|radius");
-  Serial.println("  drawCircleOutline|x|y|radius");
-  Serial.println("  drawTriangle|x0|y0|x1|y1|x2|y2");
-  Serial.println("  drawFillTriangle|x0|y0|x1|y1|x2|y2");
-  Serial.println("  drawRoundRect|x|y|w|h|radius");
-  Serial.println("  drawFillRoundRect|x|y|w|h|radius");
-  Serial.println("  drawEllipse|x|y|rx|ry");
-  Serial.println("  drawFillEllipse|x|y|rx|ry");
-  Serial.println("  flush");
-  Serial.println("Serial command interface ready!");
-  Serial0.println("Serial0 Serial command interface ready!");
+  #ifdef PRINT_SKETCH_DEBUG
+    // Print available serial commands
+    Serial.println("Available commands (format: command|param1|param2|...):");
+    Serial.println("  prt|text|x|y|size");
+    Serial.println("  clear|r|g|b");
+    Serial.println("  setColor|r|g|b");
+    Serial.println("  drawQRCode|data|x|y|moduleSize|bgR|bgG|bgB|fgR|fgG|fgB");
+    Serial.println("  drawFillRect|x|y|w|h");
+    Serial.println("  drawRect|x|y|w|h");
+    Serial.println("  drawLine|x0|y0|x1|y1");
+    Serial.println("  drawFillCircle|x|y|radius");
+    Serial.println("  drawCircleOutline|x|y|radius");
+    Serial.println("  drawTriangle|x0|y0|x1|y1|x2|y2");
+    Serial.println("  drawFillTriangle|x0|y0|x1|y1|x2|y2");
+    Serial.println("  drawRoundRect|x|y|w|h|radius");
+    Serial.println("  drawFillRoundRect|x|y|w|h|radius");
+    Serial.println("  drawEllipse|x|y|rx|ry");
+    Serial.println("  drawFillEllipse|x|y|rx|ry");
+    Serial.println("  flush");
+  #endif
+  Serial.println("Serial interface ready!");
+  Serial0.println("Serial0 interface ready!");
 }
 
 void initKeyboard(){
@@ -1358,16 +1463,18 @@ void reboot_to_bootloaderNUKE(){
 
 // This is the recommended way to reboot into the serial bootloader
 void reboot_to_bootloader() {
-  screen.clear(0,0,0);                //black out screen
-  screen.setColor(50,50,50);            //set background color of rectangle
-  screen.drawFillRect(0, 0, 320, 40);   //clear the status bar
-  screen.setColor(255,100,100);         //set text color
-  screen.prt("Entering Bootloader",0,0,2);  //print touch coords
+  if (screenWorking){
+    screen.clear(0,0,0);                //black out screen
+    screen.setColor(50,50,50);            //set background color of rectangle
+    screen.drawFillRect(0, 0, 320, 40);   //clear the status bar
+    screen.setColor(255,100,100);         //set text color
+    screen.prt("Entering Bootloader",0,0,2);  //print touch coords
 
-  screen.setColor(255,255,255);         //set text color
-  screen.prt("Esp32 will reboot into bootloader mode and provide an additonal serial port to use to flash device",0,40,2);  //print touch coords
-  screen.flush();   //anytime you want the screen to update you have to do a flush
-  
+    screen.setColor(255,255,255);         //set text color
+    screen.prt("Esp32 will reboot into bootloader mode and provide an additonal serial port to use to flash device",0,40,2);  //print touch coords
+    screen.flush();   //anytime you want the screen to update you have to do a flush
+  }
+
   getChipReadyForRestart(); //may not really needed
   delay(100);
 
@@ -1396,13 +1503,48 @@ void reboot_to_bootloader() {
 }
 
 void resetEsp32(){
-  screen.setColor(50,50,50);            //set background color of rectangle
-  screen.drawFillRect(0, 0, 320, 40);   //clear the status bar
-  screen.setColor(255,100,100);         //set text color
-  screen.prt("Resetting esp32",0,0,3);  //print touch coords
+  if (screenWorking){
+    screen.setColor(50,50,50);            //set background color of rectangle
+    screen.drawFillRect(0, 0, 320, 40);   //clear the status bar
+    screen.setColor(255,100,100);         //set text color
+    screen.prt("Resetting esp32",0,0,3);  //print touch coords
 
-  screen.flush();   //anytime you want the screen to update you have to do a flush
+    screen.flush();   //anytime you want the screen to update you have to do a flush
+  }
+
   getChipReadyForRestart();
   delay(50);
   ESP.restart();    //restart esp32
+}
+
+void handleNetworkTasks(){
+  //ArduinoOTA.handle();      //run regardless of wifi connection?
+
+  if (WiFi.status() == WL_CONNECTED){ 
+    ArduinoOTA.handle();      //run only if wifi is connected?
+
+    #ifdef USE_FTP_SERVER
+      if (ftpStarted) {
+        ftpSrv.handleFTP();
+      }
+      else if (cardType != CARD_NONE) {
+        //Restart FTP server
+        initFtpServer();
+      }
+    #endif
+
+    //dedicate CPU to just handling OTA only once started to avoid OTA issue
+    while (isOtaHappening){
+        ArduinoOTA.handle();
+    }
+  }
+
+  //periodically try to reinit failed wifi setup? Fairly sure this is intellengenly handled alredy
+  else if (cur_millis > nextNetworkConfigCheck)
+  {
+    nextNetworkConfigCheck = cur_millis + 30000;
+    initWifi(0);
+    syncTimeToNTP(0);
+    initArduinoOTA(0);
+  }
 }
